@@ -27,42 +27,53 @@ NJ_COUNTY_PREFIXES = {
 }
 
 def fetch_all_districts_metadata_live():
-    """Queries the live table and extracts geography with absolute whitespace immunity."""
+    """Queries the live table using multi-page offset streams to bypass server caps entirely."""
+    all_records = []
+    page = 0
+    page_size = 1000  # Pulling standard maximum blocks allowed by server safety controls
+    
     try:
-        # Request only what we need to minimize network payload size
-        url = f"{SUPABASE_URL}?select=cds_code,district_name"
-        response = requests.get(url, headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if not data:
-                return {}, "Success (HTTP 200) | Database Connection Active, Table Currently Vacant."
+        while True:
+            # Shift the page viewing windows incrementally (0-999, then 1000-1999, etc.)
+            offset = page * page_size
+            url = f"{SUPABASE_URL}?select=cds_code,district_name&limit={page_size}&offset={offset}"
+            response = requests.get(url, headers=headers, timeout=10)
             
-            mapping = {}
-            for row in data:
-                d_name = str(row.get('district_name', '')).strip()
-                # Crucial Fix: Cast to string, strip whitespaces, remove decimals if Excel forced float conversion
-                c_code = str(row.get('cds_code', '')).strip().split('.')[0]
-                
-                if not d_name or d_name in ["None", ""]:
-                    continue
-                if not c_code or c_code in ["None", ""]:
-                    continue
-                
-                # Force clean zero-padding up to 6 digits regardless of input state
-                padded_code = c_code.zfill(6)
-                prefix = padded_code[:2]
-                
-                # Match against our geographic dictionary, defaulting gracefully
-                c_name = NJ_COUNTY_PREFIXES.get(prefix, f"Unassigned Prefix ({prefix})")
-                
-                if c_name not in mapping:
-                    mapping[c_name] = {}
-                mapping[c_name][d_name] = c_code
-                
-            return mapping, "Success (HTTP 200) | Active Records Streamed Seamlessly."
-        else:
-            return {}, f"Server Rejected Authorization (HTTP {response.status_code})"
+            if response.status_code == 200:
+                page_data = response.json()
+                if not page_data:  # Break out the moment a page returns completely empty
+                    break
+                all_records.extend(page_data)
+                # Defensive check: if it returns fewer than 1000 rows, we've hit the very end of the database
+                if len(page_data) < page_size:
+                    break
+                page += 1
+            else:
+                return {}, f"Server Pagination Halt (HTTP {response.status_code})"
+        
+        if not all_records:
+            return {}, "Success (HTTP 200) | Database Connection Active, Table Currently Vacant."
+        
+        mapping = {}
+        for row in all_records:
+            d_name = str(row.get('district_name', '')).strip()
+            c_code = str(row.get('cds_code', '')).strip().split('.')[0]
+            
+            if not d_name or d_name in ["None", ""]:
+                continue
+            if not c_code or c_code in ["None", ""]:
+                continue
+            
+            padded_code = c_code.zfill(6)
+            prefix = padded_code[:2]
+            
+            c_name = NJ_COUNTY_PREFIXES.get(prefix, f"Unassigned Prefix ({prefix})")
+            
+            if c_name not in mapping:
+                mapping[c_name] = {}
+            mapping[c_name][d_name] = c_code
+            
+        return mapping, f"Success (HTTP 200) | Formatted all {len(all_records)} historical data lines."
     except Exception as e:
         return {}, f"Network Infrastructure Timeout: {str(e)}"
 
