@@ -16,18 +16,17 @@ except Exception:
         "Authorization": "Bearer sb_publishable_Z5yYaxAksQTfk_v5ukdovg_jZqMSs6y"
     }
 
-SUPABASE_URL = "https://gci5q9y7luqn6t8jfsfbmm.supabase.co/rest/v1/nj_school_finance_data"
+# REPLACE 'YOUR_PROJECT_ID' WITH YOUR ACTUAL SUPABASE REF STRING (e.g., 'abcde12345')
+SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co/rest/v1/nj_school_finance_data"
 
 @st.cache_data(ttl=3600)
 def fetch_statewide_metadata():
     """Fetches the complete list of unique counties and districts from Supabase to build the menus."""
     try:
-        # Requesting just the unique naming and CDS identification columns from the database
         url = f"{SUPABASE_URL}?select=county_name,district_name,cds_code"
         response = requests.get(url, headers=headers, timeout=15)
         if response.status_code == 200 and response.json():
             df = pd.DataFrame(response.json())
-            # Group into a dynamic nested dictionary structure: { County: { District: CDS } }
             mapping = {}
             for _, row in df.iterrows():
                 c_name = str(row['county_name']).strip().title()
@@ -40,7 +39,6 @@ def fetch_statewide_metadata():
             return mapping
     except Exception as e:
         st.sidebar.error(f"Metadata Link Error: {e}")
-    # Local fallback if the database connection drops during boot
     return {
         "Morris": {"Boonton Town": "270450"},
         "Atlantic": {"Absecon City": "010010", "Atlantic City": "010110"},
@@ -63,14 +61,10 @@ def fetch_live_district_data(cds_code):
 # -----------------------------------------------------------------------------
 st.sidebar.markdown("### 🔍 Control Panel")
 
-# Load the entire state structure dynamically from the cloud database ledger
 county_map = fetch_statewide_metadata()
-
-# Sort counties alphabetically for clean executive scanning
 all_counties = sorted(list(county_map.keys()))
 selected_county = st.sidebar.selectbox("Select County:", ["All"] + all_counties)
 
-# Aggregate districts based on the county filter selection
 if selected_county == "All":
     available_districts = {}
     for c_dist in county_map.values():
@@ -78,14 +72,10 @@ if selected_county == "All":
 else:
     available_districts = county_map[selected_county]
 
-# Sort districts alphabetically
 sorted_districts = sorted(list(available_districts.keys()))
 selected_district = st.sidebar.selectbox("Select School District:", sorted_districts)
-
-# Extract the unique state tracker code for the chosen district
 current_cds = available_districts.get(selected_district, "270450")
 
-# Infer localized tracking details for display cards
 inferred_county = "Morris" if "Boonton" in selected_district else "Atlantic"
 for c_name, d_dict in county_map.items():
     if selected_district in d_dict:
@@ -125,7 +115,6 @@ with tab1:
         db_lfs = float(live_records.get("local_fair_share", 0))
         is_live_sync = True
 
-    # Presentation Alignment Anchor for Boonton Town baseline validation
     if current_cds == "270450" and db_actual_aid == 0:
         db_surplus, db_tax_levy, db_actual_aid, db_uncapped_aid, db_lfs = 611424.0, 23041271.0, 2684824.0, 3215600.0, 20455100.0
 
