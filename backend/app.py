@@ -131,7 +131,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 # -----------------------------------------------------------------------------
-# 4. DATA PRESENTATION ENGINE (MATRIX TABLE LAYOUT)
+# 4. DATA PRESENTATION ENGINE (SPREADSHEET TABULAR LAYOUT)
 # -----------------------------------------------------------------------------
 with tab1:
     st.markdown("#### Audited Spreadsheet vs Cloud Database Cross-Examination")
@@ -139,31 +139,23 @@ with tab1:
 
     live_records = fetch_live_district_data(current_cds)
     
-    # Structure data into a clean, professional financial ledger table array
-    matrix_data = {
-        "Financial Parameter": [
-            "Actual State Aid Allocation",
-            "Local Tax Levy Target",
-            "Local Fair Share (LFS)",
-            "Uncapped Aid Formulation",
-            "Retained Surplus Balance"
-        ],
-        "Cloud Database Value": [
-            live_records.get("actual_state_aid", 0),
-            live_records.get("local_tax_levy", 0),
-            live_records.get("local_fair_share", 0),
-            live_records.get("uncapped_aid", 0),
-            live_records.get("surplus", 0)
-        ]
+    # Restructure data arrays into a flat row layout to restore original wide format
+    spreadsheet_data = {
+        "Actual State Aid": [live_records.get("actual_state_aid", 0)],
+        "Local Tax Levy": [live_records.get("local_tax_levy", 0)],
+        "Local Fair Share (LFS)": [live_records.get("local_fair_share", 0)],
+        "Uncapped Aid": [live_records.get("uncapped_aid", 0)],
+        "Retained Surplus": [live_records.get("surplus", 0)]
     }
     
-    df_matrix = pd.DataFrame(matrix_data)
+    df_ledger = pd.DataFrame(spreadsheet_data)
     
-    # Apply clean currency formatting to the financial value column
-    df_matrix["Cloud Database Value"] = df_matrix["Cloud Database Value"].map("${:,.2f}".format)
+    # Format all dynamic database column values into currency formats instantly
+    for col in df_ledger.columns:
+        df_ledger[col] = df_ledger[col].map("${:,.2f}".format)
     
-    # Render the structured matrix dataframe table directly onto the dashboard view
-    st.table(df_matrix)
+    # Display table without index numbers for a clean, professional spreadsheet appearance
+    st.write(df_ledger.to_html(index=False, escape=False), unsafe_allow_html=True)
 
 with tab2:
     st.markdown("#### SFRA Adequacy Explorer Component")
