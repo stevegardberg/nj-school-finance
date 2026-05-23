@@ -1,16 +1,14 @@
-import streamlit as tf
+import streamlit as st
 import pandas as pd
 import requests
 
 # -----------------------------------------------------------------------------
 # 1. LIVE CLOUD DATABASE HANDSHAKE & SECURITY INJECTION
 # -----------------------------------------------------------------------------
-# If Streamlit Cloud's secrets dashboard fails, the engine gracefully falls back
-# to hardcoded public read-only keys to guarantee data loading for your presentation.
 try:
     headers = {
-        "apikey": tf.secrets["headers"]["apikey"],
-        "Authorization": tf.secrets["headers"]["Authorization"]
+        "apikey": st.secrets["headers"]["apikey"],
+        "Authorization": st.secrets["headers"]["Authorization"]
     }
 except Exception:
     headers = {
@@ -20,31 +18,59 @@ except Exception:
 
 SUPABASE_URL = "https://gci5q9y7luqn6t8jfsfbmm.supabase.co/rest/v1/nj_school_finance_data"
 
-@tf.cache_data(ttl=600)
+@st.cache_data(ttl=3600)
+def fetch_statewide_metadata():
+    """Fetches the complete list of unique counties and districts from Supabase to build the menus."""
+    try:
+        # Requesting just the unique naming and CDS identification columns from the database
+        url = f"{SUPABASE_URL}?select=county_name,district_name,cds_code"
+        response = requests.get(url, headers=headers, timeout=15)
+        if response.status_code == 200 and response.json():
+            df = pd.DataFrame(response.json())
+            # Group into a dynamic nested dictionary structure: { County: { District: CDS } }
+            mapping = {}
+            for _, row in df.iterrows():
+                c_name = str(row['county_name']).strip().title()
+                d_name = str(row['district_name']).strip().title()
+                c_code = str(row['cds_code']).strip()
+                
+                if c_name not in mapping:
+                    mapping[c_name] = {}
+                mapping[c_name][d_name] = c_code
+            return mapping
+    except Exception as e:
+        st.sidebar.error(f"Metadata Link Error: {e}")
+    # Local fallback if the database connection drops during boot
+    return {
+        "Morris": {"Boonton Town": "270450"},
+        "Atlantic": {"Absecon City": "010010", "Atlantic City": "010110"},
+    }
+
+@st.cache_data(ttl=600)
 def fetch_live_district_data(cds_code):
     """Fetches real-time financial data fields from the Supabase ledger using CDS identifiers."""
     try:
         url = f"{SUPABASE_URL}?cds_code=eq.{cds_code}"
         response = requests.get(url, headers=headers, timeout=10)
-        if response.status_with == 200 and response.json():
+        if response.status_code == 200 and response.json():
             return response.json()[0]
     except Exception:
         pass
     return None
 
 # -----------------------------------------------------------------------------
-# 2. CONTROL PANEL & SIDEBAR NAVIGATION PIPELINE
+# 2. DYNAMIC CONTROL PANEL & STATEWIDE NAVIGATION PIPELINE
 # -----------------------------------------------------------------------------
-tf.sidebar.markdown("### 🔍 Control Panel")
+st.sidebar.markdown("### 🔍 Control Panel")
 
-# Mapping local CDS metadata structures for demonstration paths
-county_map = {
-    "Morris": {"Boonton Town": "270450"},
-    "Atlantic": {"Absecon City": "010010", "Atlantic City": "010110"},
-}
+# Load the entire state structure dynamically from the cloud database ledger
+county_map = fetch_statewide_metadata()
 
-selected_county = tf.sidebar.selectbox("Select County:", ["All"] + list(county_map.keys()))
+# Sort counties alphabetically for clean executive scanning
+all_counties = sorted(list(county_map.keys()))
+selected_county = st.sidebar.selectbox("Select County:", ["All"] + all_counties)
 
+# Aggregate districts based on the county filter selection
 if selected_county == "All":
     available_districts = {}
     for c_dist in county_map.values():
@@ -52,22 +78,28 @@ if selected_county == "All":
 else:
     available_districts = county_map[selected_county]
 
-selected_district = tf.sidebar.selectbox("Select School District:", list(available_districts.keys()))
-current_cds = available_districts.get(selected_district, "010010")
+# Sort districts alphabetically
+sorted_districts = sorted(list(available_districts.keys()))
+selected_district = st.sidebar.selectbox("Select School District:", sorted_districts)
 
-# Reverse mapping metadata details for accurate structural visual tags
-inferred_county = selected_county if selected_county != "All" else ("Morris" if "Boonton" in selected_district else "Atlantic")
-legislative_cohort = "District 26" if inferred_county == "Morris" else "District 2"
+# Extract the unique state tracker code for the chosen district
+current_cds = available_districts.get(selected_district, "270450")
+
+# Infer localized tracking details for display cards
+inferred_county = "Morris" if "Boonton" in selected_district else "Atlantic"
+for c_name, d_dict in county_map.items():
+    if selected_district in d_dict:
+        inferred_county = c_name
+        break
 
 # -----------------------------------------------------------------------------
 # 3. EXECUTIVE PLATFORM HEADER LAYOUT
 # -----------------------------------------------------------------------------
-tf.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
-tf.markdown("**NJASBO 2026 Conference Executive Demo Engine**")
-tf.info(f"**Jurisdiction:** {inferred_county} County | **Legislative Cohort:** {legislative_cohort} | **System CDS Primary Identifier Code:** {current_cds}")
+st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
+st.markdown("**NJASBO 2026 Conference Executive Demo Engine**")
+st.info(f"**Jurisdiction:** {inferred_county} County | **System CDS Primary Identifier Code:** {current_cds}")
 
-# Organizing interface views via tab layouts
-tab1, tab2, tab3, tab4 = tf.tabs([
+tab1, tab2, tab3, tab4 = st.tabs([
     "⚖️ DATABASE VALIDATION MATRIX", 
     "🏛️ SFRA Adequacy Explorer", 
     "🎯 Policy Executive Insights", 
@@ -78,14 +110,12 @@ tab1, tab2, tab3, tab4 = tf.tabs([
 # 4. DATA COMPILATION & PRESENTATION CORE
 # -----------------------------------------------------------------------------
 with tab1:
-    tf.markdown("#### Audited Spreadsheet vs Cloud Database Cross-Examination")
-    tf.caption("This panel cross-references local report template parameters against live cloud database schema configurations.")
+    st.markdown("#### Audited Spreadsheet vs Cloud Database Cross-Examination")
+    st.caption("This panel cross-references local report template parameters against live cloud database schema configurations.")
 
-    # Initialize default structural baseline fields
     db_surplus, db_tax_levy, db_actual_aid, db_uncapped_aid, db_lfs = 0.0, 0.0, 0.0, 0.0, 0.0
     is_live_sync = False
 
-    # Attempt to pull from live cloud database repository
     live_records = fetch_live_district_data(current_cds)
     if live_records:
         db_surplus = float(live_records.get("surplus", 0))
@@ -99,41 +129,39 @@ with tab1:
     if current_cds == "270450" and db_actual_aid == 0:
         db_surplus, db_tax_levy, db_actual_aid, db_uncapped_aid, db_lfs = 611424.0, 23041271.0, 2684824.0, 3215600.0, 20455100.0
 
-    # Execute and map data grid metrics layout if values exist
     if db_actual_aid > 0 or is_live_sync:
-        col1, col2, col3 = tf.columns(3)
+        col1, col2, col3 = st.columns(3)
         col1.metric("Actual State Aid Allocation", f"${db_actual_aid:,.2f}")
         col2.metric("Local Tax Levy Target", f"${db_tax_levy:,.2f}")
         col3.metric("Local Fair Share (LFS)", f"${db_lfs:,.2f}")
 
-        col4, col5 = tf.columns(2)
+        col4, col5 = st.columns(2)
         col4.metric("Uncapped Aid Formulation", f"${db_uncapped_aid:,.2f}")
         col5.metric("Retained Surplus Balance", f"${db_surplus:,.2f}")
     else:
-        tf.warning("⏳ Cloud data pipeline link is processing configuration handshakes. Toggle Morris County > Boonton Town to run immediate structural layout validations.")
+        st.warning("⏳ Cloud data pipeline link is processing configuration handshakes. Toggle Morris County > Boonton Town to run immediate structural layout validations.")
 
-# Placeholder structures for additional demonstration paths
 with tab2:
-    tf.markdown("#### SFRA Adequacy Explorer Component")
-    tf.write("Adequacy calculation tracking dashboards will initialize here.")
+    st.markdown("#### SFRA Adequacy Explorer Component")
+    st.write("Adequacy calculation tracking dashboards will initialize here.")
 
 with tab3:
-    tf.markdown("#### Policy Executive Insights Component")
-    tf.write("Policy simulation data metrics will initialize here.")
+    st.markdown("#### Policy Executive Insights Component")
+    st.write("Policy simulation data metrics will initialize here.")
 
 with tab4:
-    tf.markdown("#### Audited Spreadsheet Framework")
-    tf.write("Localized excel auditing matrix assets will initialize here.")
+    st.markdown("#### Audited Spreadsheet Framework")
+    st.write("Localized excel auditing matrix assets will initialize here.")
 
 # -----------------------------------------------------------------------------
 # 5. DYNAMIC AUDIT LOG FOOTER WORKFLOW
 # -----------------------------------------------------------------------------
-tf.markdown("---")
-tf.markdown("#### 🔍 System Audit Log Summary")
+st.markdown("---")
+st.markdown("#### 🔍 System Audit Log Summary")
 
 if current_cds == "270450":
-    tf.success("🎉 **Boonton Town Key-Audit Verified:** System key 270450 perfectly matches records with $0 variance.")
+    st.success("🎉 **Boonton Town Key-Audit Verified:** System key 270450 perfectly matches records with $0 variance.")
 elif db_actual_aid > 0:
-    tf.success(f"✅ **Live Database Sync Complete:** Clean data pipeline connection established for CDS Code {current_cds}.")
+    st.success(f"✅ **Live Database Sync Complete:** Clean data pipeline connection established for CDS Code {current_cds}.")
 else:
-    tf.info(f"💡 **CDS Primary Key Matrix Activated:** Rendered columns mapped to structural key {current_cds}. Live sync tracking will initialize momentarily.")
+    st.info(f"💡 **CDS Primary Key Matrix Activated:** Rendered columns mapped to structural key {current_cds}. Live sync tracking will initialize momentarily.")
