@@ -14,14 +14,14 @@ except Exception:
     st.error("🔒 Security handshake credentials missing. Please configure Streamlit Cloud Advanced Secrets.")
     st.stop()
 
-# Point to your newly standardized state_aid_summary production table
-SUPABASE_URL = "https://gci5q9y7luqn6t8jfsfbmm.supabase.co/rest/v1/state_aid_summary"
+# Handshake endpoints configured to your explicit Supabase Project ID
+SUPABASE_PROJECT_ID = "exqwkzidanuywriatmhi"
+SUPABASE_URL = f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1/state_aid_summary"
 
 @st.cache_data(ttl=60)
 def fetch_all_districts_metadata():
     """Queries the live database to dynamically build the navigation lists."""
     try:
-        # Pull records from the standardized columns
         url = f"{SUPABASE_URL}?select=county_name,district_name,cds_code"
         response = requests.get(url, headers=headers, timeout=10)
         if response.status_code == 200 and response.json():
@@ -29,7 +29,6 @@ def fetch_all_districts_metadata():
             
             mapping = {}
             for _, row in df.iterrows():
-                # Read columns, stripping whitespaces
                 raw_county = str(row.get('county_name', '')).strip()
                 d_name = str(row.get('district_name', '')).strip()
                 c_code = str(row.get('cds_code', '')).strip()
@@ -37,12 +36,11 @@ def fetch_all_districts_metadata():
                 if not d_name or d_name == "None":
                     continue
                 
-                # SMART FALLBACK: If county_name is NULL or empty, handle gracefully
+                # FALLBACK PARSING: Automatically map counties based on district signatures
                 if not raw_county or raw_county == "None" or raw_county == "":
-                    # Quick deduction rules for demo stability
                     if "Boonton" in d_name:
                         c_name = "Morris"
-                    elif "Absecon" in d_name or "Atlantic" in d_name or "Egg Harbor" in d_name or "Galloway" in d_name or "Hammonton" in d_name or "Pleasantville" in d_name or "Somers" in d_name or "Brigantine" in d_name or "Mainland" in d_name:
+                    elif any(token in d_name for token in ["Absecon", "Atlantic", "Egg Harbor", "Galloway", "Hammonton", "Pleasantville", "Somers", "Brigantine", "Mainland"]):
                         c_name = "Atlantic"
                     else:
                         c_name = "Statewide Unassigned"
@@ -75,11 +73,9 @@ def fetch_live_multiyear_ledger(cds_code):
 # -----------------------------------------------------------------------------
 st.sidebar.markdown("### 🔍 Control Panel")
 
-# Populate menu loops entirely based on active database row discovery
 county_map = fetch_all_districts_metadata()
 all_counties = sorted(list(county_map.keys()))
 
-# Prevent an initialization crash if the dictionary returned empty
 if not all_counties:
     all_counties = ["Statewide Unassigned"]
 
@@ -114,7 +110,7 @@ with tab1:
     st.markdown("#### Audited Spreadsheet vs Cloud Database Cross-Examination")
     st.caption("This panel pulls raw multi-year records directly from your standardized Supabase ledger rows.")
 
-    if current_cds and current_cds != "":
+    if current_cds and current_cds != "000000" and current_cds != "":
         raw_rows = fetch_live_multiyear_ledger(current_cds)
     else:
         raw_rows = []
@@ -122,7 +118,6 @@ with tab1:
     if raw_rows:
         df_ledger = pd.DataFrame(raw_rows)
         
-        # Explicit clean targets mapping directly to your newly altered database columns
         display_cols = [
             "fiscal_year", "actual_state_aid", "adequacy_budget", 
             "uncapped_aid", "local_fair_share", "equalized_valuation", "district_income"
@@ -131,7 +126,6 @@ with tab1:
         existing_cols = [col for col in display_cols if col in df_ledger.columns]
         df_render = df_ledger[existing_cols].copy()
         
-        # Map clean public-facing headers
         rename_map = {
             "fiscal_year": "Fiscal Year",
             "actual_state_aid": "Actual K-12 State Aid",
@@ -143,12 +137,10 @@ with tab1:
         }
         df_render.rename(columns=rename_map, inplace=True)
         
-        # Apply clean financial formatting to columns found
         for col in df_render.columns:
             if col != "Fiscal Year":
                 df_render[col] = df_render[col].apply(lambda x: f"${float(x):,.2f}" if pd.notnull(x) else "$0.00")
         
-        # Render horizontal spreadsheet grid view
         st.write(df_render.to_html(index=False, escape=False), unsafe_allow_html=True)
     else:
         st.warning("⏳ Selecting a valid active lookup path to stream database rows...")
