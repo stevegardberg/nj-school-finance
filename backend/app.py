@@ -14,49 +14,51 @@ except Exception:
     st.error("🔒 Security handshake credentials missing. Please configure Streamlit Cloud Advanced Secrets.")
     st.stop()
 
-# Explicitly mapping to your verified project parameters
 SUPABASE_PROJECT_ID = "exqwkzidanuywriatmhi"
 SUPABASE_URL = f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1/state_aid_summary"
 
+# Immutable NJ State County Code Signature Mapping Dictionary
+NJ_COUNTY_PREFIXES = {
+    "01": "Atlantic", "03": "Bergen", "05": "Burlington", "07": "Camden",
+    "09": "Cape May", "11": "Cumberland", "13": "Essex", "15": "Gloucester",
+    "17": "Hudson", "19": "Hunterdon", "21": "Mercer", "23": "Middlesex",
+    "25": "Monmouth", "27": "Morris", "29": "Ocean", "31": "Passaic",
+    "33": "Salem", "35": "Somerset", "37": "Sussex", "39": "Union", "41": "Warren"
+}
+
 def fetch_all_districts_metadata_live():
-    """Queries your live table rows without caching to analyze true structure limits."""
+    """Queries the live table and automatically parses geography using the CDS prefix spine."""
     try:
-        url = f"{SUPABASE_URL}?select=county_name,district_name,cds_code"
+        url = f"{SUPABASE_URL}?select=cds_code,district_name"
         response = requests.get(url, headers=headers, timeout=10)
         
-        # HTTP 200 means the key is completely valid and the database door is open
         if response.status_code == 200:
             data = response.json()
             if not data:
                 return {}, "Success (HTTP 200) | Database Connection Active, Table Currently Vacant."
             
-            df = pd.DataFrame(data)
             mapping = {}
-            for _, row in df.iterrows():
-                raw_county = str(row.get('county_name', '')).strip()
+            for row in data:
                 d_name = str(row.get('district_name', '')).strip()
                 c_code = str(row.get('cds_code', '')).strip()
                 
                 if not d_name or d_name == "None" or d_name == "":
                     continue
                 
-                if not raw_county or raw_county == "None" or raw_county == "":
-                    if "Boonton" in d_name:
-                        c_name = "Morris"
-                    elif any(token in d_name for token in ["Absecon", "Atlantic", "Egg Harbor", "Galloway", "Hammonton", "Pleasantville", "Somers", "Brigantine", "Mainland"]):
-                        c_name = "Atlantic"
-                    else:
-                        c_name = "Statewide Unassigned"
-                else:
-                    c_name = raw_county
+                # Zero-pad short CDS codes to ensure accurate prefix isolation (e.g., '15780' -> '015780')
+                padded_code = c_code.zfill(6)
+                prefix = padded_code[:2]
+                
+                # Dynamically determine the true county using the prefix dictionary
+                c_name = NJ_COUNTY_PREFIXES.get(prefix, "Statewide Unassigned")
                 
                 if c_name not in mapping:
                     mapping[c_name] = {}
                 mapping[c_name][d_name] = c_code
                 
-            return mapping, "Success (HTTP 200) | Active Records Streamed."
+            return mapping, "Success (HTTP 200) | Active Records Streamed Seamlessly."
         else:
-            return {}, f"Server Rejected Authorization (HTTP {response.status_code}: {response.text})"
+            return {}, f"Server Rejected Authorization (HTTP {response.status_code})"
     except Exception as e:
         return {}, f"Network Infrastructure Timeout: {str(e)}"
 
@@ -80,7 +82,6 @@ st.sidebar.markdown("### 🔍 Control Panel")
 county_map, network_diagnostic_msg = fetch_all_districts_metadata_live()
 all_counties = sorted(list(county_map.keys()))
 
-# Seamless layout override to allow screen staging before CSV data populate
 if not all_counties:
     county_map = {"Staging Cluster": {"Upload Target Data Spreadsheet": "000000"}}
     all_counties = list(county_map.keys())
@@ -136,10 +137,7 @@ with tab1:
                 df_render[col] = df_render[col].apply(lambda x: f"${float(x):,.2f}" if pd.notnull(x) else "$0.00")
         st.write(df_render.to_html(index=False, escape=False), unsafe_allow_html=True)
     else:
-        if "Table Currently Vacant" in network_diagnostic_msg:
-            st.info("ℹ️ **Database Table Initialized and Empty:** The platform has established a verified secure handshake with Supabase. Populate records inside the table 'state_aid_summary' via your Supabase dashboard dashboard to stream live data rows.")
-        else:
-            st.warning("⏳ Selecting a valid active lookup path to stream database rows...")
+        st.warning("⏳ Selecting a valid active lookup path to stream database rows...")
 
 with tab2:
     st.markdown("#### UFB Appropriations Component Ledger")
