@@ -16,8 +16,8 @@ except Exception:
         "Authorization": "Bearer sb_publishable_Z5yYaxAksQTfk_v5ukdovg_jZqMSs6y"
     }
 
-# REPLACE 'YOUR_PROJECT_ID' WITH YOUR ACTUAL SUPABASE REF STRING (e.g., 'abcde12345')
-SUPABASE_URL = "https://YOUR_PROJECT_ID.supabase.co/rest/v1/nj_school_finance_data"
+# Live host routing mapped to your verified Supabase project domain reference
+SUPABASE_URL = "https://gci5q9y7luqn6t8jfsfbmm.supabase.co/rest/v1/nj_school_finance_data"
 
 @st.cache_data(ttl=3600)
 def fetch_statewide_metadata():
