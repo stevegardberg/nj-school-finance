@@ -27,8 +27,9 @@ NJ_COUNTY_PREFIXES = {
 }
 
 def fetch_all_districts_metadata_live():
-    """Queries the live table and automatically parses geography using the CDS prefix spine."""
+    """Queries the live table and extracts geography with absolute whitespace immunity."""
     try:
+        # Request only what we need to minimize network payload size
         url = f"{SUPABASE_URL}?select=cds_code,district_name"
         response = requests.get(url, headers=headers, timeout=10)
         
@@ -40,17 +41,20 @@ def fetch_all_districts_metadata_live():
             mapping = {}
             for row in data:
                 d_name = str(row.get('district_name', '')).strip()
-                c_code = str(row.get('cds_code', '')).strip()
+                # Crucial Fix: Cast to string, strip whitespaces, remove decimals if Excel forced float conversion
+                c_code = str(row.get('cds_code', '')).strip().split('.')[0]
                 
-                if not d_name or d_name == "None" or d_name == "":
+                if not d_name or d_name in ["None", ""]:
+                    continue
+                if not c_code or c_code in ["None", ""]:
                     continue
                 
-                # Zero-pad short CDS codes to ensure accurate prefix isolation (e.g., '15780' -> '015780')
+                # Force clean zero-padding up to 6 digits regardless of input state
                 padded_code = c_code.zfill(6)
                 prefix = padded_code[:2]
                 
-                # Dynamically determine the true county using the prefix dictionary
-                c_name = NJ_COUNTY_PREFIXES.get(prefix, "Statewide Unassigned")
+                # Match against our geographic dictionary, defaulting gracefully
+                c_name = NJ_COUNTY_PREFIXES.get(prefix, f"Unassigned Prefix ({prefix})")
                 
                 if c_name not in mapping:
                     mapping[c_name] = {}
