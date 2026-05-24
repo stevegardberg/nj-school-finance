@@ -92,10 +92,10 @@ def clean_html_currency_formatter(df):
     return df_formatted.to_html(index=False, escape=False)
 
 # -----------------------------------------------------------------------------
-# 2. RUN HARDENED DATA PIPELINE ACQUISITION
+# 2. RUN DATA PIPELINE ACQUISITION
 # -----------------------------------------------------------------------------
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
-st.markdown("**NJASBO 2026 Presentation Engine (Integer Alignment Run)**")
+st.markdown("**NJASBO 2026 Presentation Engine (Absolute Isolation Run)**")
 
 raw_summary = fetch_supabase_table_data(SUPABASE_URL_SUMMARY)
 raw_mapping = fetch_supabase_table_data(SUPABASE_URL_MAPPING)
@@ -110,9 +110,8 @@ if df_summary_base.empty:
     st.error("⏳ Critical Error: The master financial data storage pool cannot be read.")
     st.stop()
 
-# HARDENED CONVERSION PASSTHROUGH: Force join keys into numeric integers to bypass string formatting bugs
+# ABSOLUTE ISOLATION SANITIZATION: Force join keys into numeric integers to bypass string formatting bugs
 def secure_integer_cast(series):
-    # Splits decimal fragments, handles blanks, and outputs a generic fallback integer
     clean_series = series.astype(str).str.split('.').str[0].str.strip()
     return pd.to_numeric(clean_series, errors='coerce').fillna(0).astype(int)
 
@@ -123,10 +122,9 @@ if not df_mapping_base.empty: df_mapping_base["join_key_int"] = secure_integer_c
 # Extract county codes based on the original string positioning
 df_summary_base["county_code_string"] = df_summary_base["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:2]
 
-# Prepare descriptive labels safely
-if "district_type" not in df_types_base.columns:
-    df_types_base["district_type"] = "B. K-8 / 0 - 400"
+# Clean the lookup frame to prevent any text drift or spaces
 df_types_base["district_type"] = df_types_base["district_type"].astype(str).str.strip()
+df_types_base["district_name"] = df_types_base["district_name"].astype(str).str.strip()
 df_types_base["type_letter"] = df_types_base["district_type"].map(lambda x: x.split('.')[0].strip().upper() if '.' in x else x[:1].upper())
 
 # Extract wealth modifiers safely from user budgets
@@ -145,25 +143,24 @@ else:
     val_lookup, inc_lookup = {}, {}
 
 # -----------------------------------------------------------------------------
-# 3. COMBINE DATASETS USING HARDENED INTEGER INNER MATCHES
+# 3. COMBINE DATASETS USING ABSOLUTE ISOLATION INNER JOIN MATCHES
 # -----------------------------------------------------------------------------
-cols_to_drop = ["assigned_type", "assigned_type_label", "assigned_type_letter", "district_type", "type_letter", "district_name"]
-df_summary_base.drop(columns=[c for c in cols_to_drop if c in df_summary_base.columns], inplace=True)
+# CRITICAL FIX: Explicitly strip out ANY lingering column variables from the summary ledger 
+# to guarantee they cannot override the fresh database metadata during the merge.
+cols_to_purge = ["assigned_type", "assigned_type_label", "assigned_type_letter", "district_type", "type_letter", "district_name", "assigned_ld"]
+for col in cols_to_purge:
+    if col in df_summary_base.columns:
+        df_summary_base.drop(columns=[col], inplace=True)
 
 # Merge frameworks matching strictly on integer codes
 if not df_types_base.empty:
     df_types_clean_merge = df_types_base[["join_key_int", "district_name", "district_type", "type_letter"]].copy()
-    df_joined_master = pd.merge(df_summary_base, df_types_clean_merge, on="join_key_int", how="left")
+    df_joined_master = pd.merge(df_summary_base, df_types_clean_merge, on="join_key_int", how="inner")
 else:
     df_joined_master = df_summary_base.copy()
     df_joined_master["district_name"] = "Unknown District"
     df_joined_master["district_type"] = "B. K-8 / 0 - 400"
     df_joined_master["type_letter"] = "B"
-
-# Fallback defaults if an incomplete record from the ledger falls outside our map boundaries
-df_joined_master["district_type"] = df_joined_master["district_type"].fillna("B. K-8 / 0 - 400")
-df_joined_master["type_letter"] = df_joined_master["type_letter"].fillna("B")
-df_joined_master["district_name"] = df_joined_master["district_name"].fillna("Unknown District Name")
 
 # Re-link legislative maps
 leg_dict = dict(zip(df_mapping_base["join_key_int"], df_mapping_base["legislative_district"].astype(str).str.strip())) if not df_mapping_base.empty else {}
@@ -182,7 +179,7 @@ for target in ["adequacy_budget", "uncapped_aid", "actual_net_payout", "s2_adjus
 df_joined_master["lfs_delta"] = df_joined_master["actual_tax_levy"] - df_joined_master["local_fair_share"]
 df_joined_master["assigned_county"] = df_joined_master["county_code_string"].map(lambda x: NJ_COUNTY_PREFIXES.get(x, "Unassigned"))
 
-# Generate static dropdown choices directly from verified table outputs
+# DYNAMIC DROPDOWN GENERATION: Create options array directly from the active, joined master set
 master_ld_options = sorted(list(set(df_joined_master[df_joined_master["assigned_ld"] != "Unassigned LD"]["assigned_ld"].dropna())))
 master_type_options = sorted(list(set(df_joined_master["district_type"].dropna())))
 
@@ -191,7 +188,7 @@ with st.expander("🔍 Live Database Connection Diagnostic Pre-Flight Logs", exp
     col_d1, col_d2, col_d3 = st.columns(3)
     col_d1.metric("Financial Ledger Rows", f"{len(df_joined_master)} rows")
     col_d2.metric("Distinct Types Found", f"{len(master_type_options)} groups")
-    col_d3.metric("Relational Integer Join", "Passed (Harden-Matched)")
+    col_d3.metric("Dropdown Options Array", str(master_type_options))
 
 # -----------------------------------------------------------------------------
 # 4. ADVANCED HIERARCHICAL CASCADING HEADER FILTERS
