@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import requests
 
-# Set page configuration to maximum wide-mode for 12-column high spreadsheet density
+# Set page configuration to maximum wide-mode for 12-column spreadsheet density
 st.set_page_config(layout="wide")
 
 # -----------------------------------------------------------------------------
@@ -86,9 +86,6 @@ def clean_html_currency_formatter(df):
 # -----------------------------------------------------------------------------
 # 2. RUN DATA PIPELINE FETCHING & MULTI-TABLE MESH RELINKING
 # -----------------------------------------------------------------------------
-st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
-st.markdown("**NJASBO 2026 Presentation Engine (Hierarchical Character Normalization)**")
-
 raw_summary = fetch_supabase_table_data(SUPABASE_URL_SUMMARY)
 raw_mapping = fetch_supabase_table_data(SUPABASE_URL_MAPPING)
 raw_types = fetch_supabase_table_data(SUPABASE_URL_DIST_TYPE)
@@ -103,14 +100,14 @@ df_all_mapping = pd.DataFrame(raw_mapping) if raw_mapping else pd.DataFrame(colu
 df_all_types = pd.DataFrame(raw_types) if raw_types else pd.DataFrame(columns=["cds_code", "district_type", "district_name"])
 df_all_rev = pd.DataFrame(raw_revenue) if raw_revenue else pd.DataFrame(columns=["cds_code", "fiscal_year", "line_no", "amount"])
 
-# Standardize text strings safely
+# Standardize text identifier strings safely across all frames
 df_all_summary["cds_code"] = df_all_summary["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
 if not df_all_mapping.empty: df_all_mapping["cds_code"] = df_all_mapping["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
 if not df_all_types.empty: df_all_types["cds_code"] = df_all_types["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
 
 leg_dict = dict(zip(df_all_mapping["cds_code"], df_all_mapping["legislative_district"].astype(str).str.strip())) if not df_all_mapping.empty else {}
 
-# Create dictionaries for fast lookup mapping matching bounds
+# Build client-side lookup arrays
 type_string_label_dict = {}
 type_letter_code_dict = {}
 if not df_all_types.empty:
@@ -120,7 +117,7 @@ if not df_all_types.empty:
         type_string_label_dict[code] = full_type_str
         type_letter_code_dict[code] = full_type_str.split('.')[0].strip().upper() if '.' in full_type_str else full_type_str[:1].upper()
 
-# Populate the wealth lookups from the raw revenue data rows using PyArrow safe formatting
+# Map properties from alternate tables directly to core matrix frame
 if not df_all_rev.empty:
     df_all_rev["cds_code"] = df_all_rev["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
     df_all_rev["fiscal_year"] = df_all_rev["fiscal_year"].astype(str).str.strip().str.upper()
@@ -129,52 +126,40 @@ if not df_all_rev.empty:
     df_val = df_all_rev[df_all_rev["line_no"].isin([40, "40"])].copy()
     df_inc = df_all_rev[df_all_rev["line_no"].isin([20, "20"])].copy()
     
-    # FIX: Use safe .str.cat method to join text keys securely under PyArrow structures
-    val_keys = df_val["cds_code"].str.cat(df_val["fiscal_year"], sep="_")
-    inc_keys = df_inc["cds_code"].str.cat(df_inc["fiscal_year"], sep="_")
-    
-    val_lookup = dict(zip(val_keys, df_val["amount"]))
-    inc_lookup = dict(zip(inc_keys, df_inc["amount"]))
+    val_lookup = dict(zip(df_val["cds_code"].str.cat(df_val["fiscal_year"], sep="_"), df_val["amount"]))
+    inc_lookup = dict(zip(df_inc["cds_code"].str.cat(df_inc["fiscal_year"], sep="_"), df_inc["amount"]))
 else:
     val_lookup, inc_lookup = {}, {}
 
 df_all_summary["fiscal_year"] = df_all_summary["fiscal_year"].astype(str).str.strip().str.upper()
-
-# FIX: Safely construct key matrix link via the .str.cat function to prevent string addition crashes
 df_all_summary["lookup_key"] = df_all_summary["cds_code"].str.cat(df_all_summary["fiscal_year"], sep="_")
 df_all_summary["equalized_valuation"] = df_all_summary["lookup_key"].map(lambda x: val_lookup.get(x, 0.0))
 df_all_summary["district_income"] = df_all_summary["lookup_key"].map(lambda x: inc_lookup.get(x, 0.0))
 
-# Fast-cast financial numbers safely
+# Fast-cast numeric formats safely
 for target in ["adequacy_budget", "uncapped_aid", "actual_net_payout", "s2_adjustment", "local_fair_share", "actual_tax_levy", "equalized_valuation", "district_income"]:
     df_all_summary[target] = pd.to_numeric(df_all_summary.get(target, 0.0)).fillna(0.0)
 
 df_all_summary["lfs_delta"] = df_all_summary["actual_tax_levy"] - df_all_summary["local_fair_share"]
 df_all_summary["assigned_ld"] = df_all_summary["cds_code"].map(lambda x: f"District {leg_dict.get(x)}" if leg_dict.get(x) else "Unassigned LD")
 
-df_all_summary["assigned_type_label"] = df_all_summary["cds_code"].map(lambda x: type_string_label_dict.get(x, "E. K-12 / 0 - 1800"))
-df_all_summary["assigned_type_letter"] = df_all_summary["cds_code"].map(lambda x: type_letter_code_dict.get(x, "E"))
+# Map both the formal full label string AND the standardized first-letter prefix token code
+df_all_summary["assigned_type_label"] = df_all_summary["cds_code"].map(lambda x: type_string_label_dict.get(x, "Unassigned Type"))
+df_all_summary["assigned_type_letter"] = df_all_summary["cds_code"].map(lambda x: type_letter_code_dict.get(x, "Unassigned Letter"))
 df_all_summary["assigned_county"] = df_all_summary["cds_code"].map(lambda x: NJ_COUNTY_PREFIXES.get(x[:2], "Unassigned"))
 
-# Build master lists
+# Generate static lists of dropdown selection choices directly from valid mapping assets
 master_ld_options = sorted(list(set(df_all_summary[df_all_summary["assigned_ld"] != "Unassigned LD"]["assigned_ld"].dropna())))
 
-if not df_all_types.empty and "district_type" in df_all_types.columns:
+if not df_all_types.empty:
     master_type_options = sorted(list(set(df_all_types["district_type"].astype(str).str.strip().dropna())))
     if "Statewide General Context" in master_type_options: master_type_options.remove("Statewide General Context")
     if "district_type" in master_type_options: master_type_options.remove("district_type")
 else:
     master_type_options = ["E. K-12 / 0 - 1800"]
 
-# Pre-flight diagnostic panel
-with st.expander("🔍 Live Database Connection Diagnostic Pre-Flight Logs", expanded=False):
-    col_d1, col_d2, col_d3 = st.columns(3)
-    col_d1.metric("Financial Ledger Rows", f"{len(df_all_summary)} rows")
-    col_d2.metric("Revenue Cross-Map Rows", f"{len(df_all_rev)} rows")
-    col_d3.metric("District Type Map Rows", f"{len(df_all_types)} rows")
-
 # -----------------------------------------------------------------------------
-# 3. ADVANCED HIERARCHICAL CASCADING HEADER FILTERS
+# 3. FIX: ISOLATED AND HARDENED DRILL-DOWN FILTERS (STABILIZATION PASSTHROUGH)
 # -----------------------------------------------------------------------------
 with st.container():
     r_col1, r_col2 = st.columns([6, 1])
@@ -182,27 +167,36 @@ with st.container():
         if st.button("🔄 Reset All Filters", use_container_width=True): st.rerun()
 
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
-    with f_col1: sel_ld = st.selectbox("1️⃣ Legislative Filter:", ["All Legislative Districts"] + master_ld_options, index=0)
-    with f_col2: sel_type_label = st.selectbox("2️⃣ District Type Filter:", ["All District Types"] + master_type_options, index=0)
+    
+    with f_col1:
+        sel_ld = st.selectbox("1️⃣ Legislative Filter:", ["All Legislative Districts"] + master_ld_options, index=0)
+    with f_col2:
+        sel_type_label = st.selectbox("2️⃣ District Type Filter:", ["All District Types"] + master_type_options, index=0)
 
-    df_cascade = df_all_summary.copy()
-    if sel_ld != "All Legislative Districts": 
-        df_cascade = df_cascade[df_cascade["assigned_ld"] == sel_ld]
+    # CRITICAL STABILIZATION PASSTHROUGH: Explicitly create a copy to wipe state cache on step validation transitions
+    df_filtered_step1 = df_all_summary.copy()
+    
+    if sel_ld != "All Legislative Districts":
+        df_filtered_step1 = df_filtered_step1[df_filtered_step1["assigned_ld"] == sel_ld]
         
-    if sel_type_label != "All District Types": 
+    if sel_type_label != "All District Types":
+        # Extract first letter character token strictly (e.g. "G" or "B")
         target_letter = sel_type_label.split('.')[0].strip().upper() if '.' in sel_type_label else sel_type_label[:1].upper()
-        df_cascade = df_cascade[df_cascade["assigned_type_letter"] == target_letter]
+        df_filtered_step1 = df_filtered_step1[df_filtered_step1["assigned_type_letter"] == target_letter]
 
     with f_col3:
-        available_counties = sorted(list(set(df_cascade["assigned_county"].dropna())))
+        available_counties = sorted(list(set(df_filtered_step1["assigned_county"].dropna())))
         if "Unassigned" in available_counties: available_counties.remove("Unassigned")
         sel_county = st.selectbox("3️⃣ Local County:", ["All Counties"] + available_counties, index=0)
 
-    if sel_county != "All Counties": df_cascade = df_cascade[df_cascade["assigned_county"] == sel_county]
+    df_filtered_step2 = df_filtered_step1.copy()
+    if sel_county != "All Counties":
+        df_filtered_step2 = df_filtered_step2[df_filtered_step2["assigned_county"] == sel_county]
 
     with f_col4:
-        available_towns = sorted(list(set(df_cascade["district_name"].dropna())))
+        available_towns = sorted(list(set(df_filtered_step2["district_name"].dropna())))
         sel_district = st.selectbox("4️⃣ Target Local District:", ["Select a District..."] + available_towns, index=0)
+
     st.markdown("---")
 
 tab1, tab2, tab3 = st.tabs(["⚖️ DATABASE VALIDATION MATRIX", "📊 User Friendly Budget Approp Explorer", "🎯 Academic Return Matrix"])
@@ -240,7 +234,7 @@ def calculate_advanced_metrics(df_group):
     return df
 
 # -----------------------------------------------------------------------------
-# 5. RENDER PERFORMANCE GRIDS
+# 5. RENDER GRIDS
 # -----------------------------------------------------------------------------
 with tab1:
     current_active_ld, current_active_type_letter = None, None
@@ -269,7 +263,7 @@ with tab1:
             current_active_ld = df_district_raw["assigned_ld"].iloc[0]
             current_active_type_letter = df_district_raw["assigned_type_letter"].iloc[0]
     else:
-        st.info("💡 Select a local target district above to initialize the multi-year calculation ledger.")
+        st.info("💡 Select a local target district above to view the multi-year calculation ledger.")
 
     st.markdown("<br><hr>", unsafe_allow_html=True)
 
