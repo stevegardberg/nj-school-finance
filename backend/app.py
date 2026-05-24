@@ -29,20 +29,16 @@ def fetch_all_districts_metadata_live():
     all_records = []
     page = 0
     page_size = 1000  
-    
     try:
         while True:
             offset = page * page_size
             url = f"{SUPABASE_URL}?select=cds_code,district_name&limit={page_size}&offset={offset}"
             response = requests.get(url, headers=headers, timeout=10)
-            
             if response.status_code == 200:
                 page_data = response.json()
-                if not page_data:  
-                    break
+                if not page_data: break
                 all_records.extend(page_data)
-                if len(page_data) < page_size:
-                    break
+                if len(page_data) < page_size: break
                 page += 1
             else:
                 return {}, f"Server Pagination Halt (HTTP {response.status_code})"
@@ -56,16 +52,15 @@ def fetch_all_districts_metadata_live():
             padded_code = c_code.zfill(6)
             prefix = padded_code[:2]
             c_name = NJ_COUNTY_PREFIXES.get(prefix, f"Unassigned Prefix ({prefix})")
-            if c_name not in mapping:
-                mapping[c_name] = {}
+            if c_name not in mapping: mapping[c_name] = {}
             mapping[c_name][d_name] = c_code
-            
-        return mapping, f"Success (HTTP 200) | Formatted all {len(all_records)} historical data lines."
+        return mapping, f"Success (HTTP 200) | Synchronized {len(all_records)} structural data lines."
     except Exception as e:
         return {}, f"Network Infrastructure Timeout: {str(e)}"
 
-@st.cache_data(ttl=1)
-def fetch_live_multiyear_ledger(cds_code):
+# FORCE ZERO-TTL STREAM: Wipes out the dashboard cache freeze loops completely
+def fetch_live_multiyear_ledger_uncached(cds_code):
+    """Pulls clean, live-database results with zero local stream caching."""
     try:
         url = f"{SUPABASE_URL}?cds_code=eq.{cds_code}&order=fiscal_year.asc"
         response = requests.get(url, headers=headers, timeout=10)
@@ -111,7 +106,7 @@ with tab1:
     st.caption("This panel pulls raw multi-year records directly from your standardized Supabase ledger rows.")
 
     if current_cds and current_cds != "000000" and current_cds != "":
-        raw_rows = fetch_live_multiyear_ledger(current_cds)
+        raw_rows = fetch_live_multiyear_ledger_uncached(current_cds)
     else:
         raw_rows = []
     
@@ -154,7 +149,6 @@ with tab1:
         df_summary = pd.DataFrame([summary_row])
         df_final = pd.concat([df_render, df_summary], ignore_index=True)
 
-        # Explicitly maps actual_net_payout -> "Actual State Aid"
         rename_map = {
             "fiscal_year": "Fiscal Year", 
             "uncapped_aid": "Uncapped SFRA Formula Target", 
@@ -180,8 +174,7 @@ with tab1:
                     try:
                         val_float = float(val_str)
                         formatted_val = f"${val_float:,.2f}" if val_float >= 0 else f"$-{abs(val_float):,.2f}"
-                        if "<b>" in str(x):
-                            return f"<b>{formatted_val}</b>"
+                        if "<b>" in str(x): return f"<b>{formatted_val}</b>"
                         return formatted_val
                     except ValueError:
                         return str(x)
