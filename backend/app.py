@@ -103,15 +103,14 @@ df_all_mapping = pd.DataFrame(raw_mapping) if raw_mapping else pd.DataFrame(colu
 df_all_types = pd.DataFrame(raw_types) if raw_types else pd.DataFrame(columns=["cds_code", "district_type", "district_name"])
 df_all_rev = pd.DataFrame(raw_revenue) if raw_revenue else pd.DataFrame(columns=["cds_code", "fiscal_year", "line_no", "amount"])
 
-# Standardize text strings
+# Standardize text strings safely
 df_all_summary["cds_code"] = df_all_summary["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
 if not df_all_mapping.empty: df_all_mapping["cds_code"] = df_all_mapping["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
 if not df_all_types.empty: df_all_types["cds_code"] = df_all_types["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
 
-# Build basic dictionaries
 leg_dict = dict(zip(df_all_mapping["cds_code"], df_all_mapping["legislative_district"].astype(str).str.strip())) if not df_all_mapping.empty else {}
 
-# HARDENED ALIGNMENT FIX: Create two dictionaries—one for the full string label, and one for just the first letter character
+# Create dictionaries for fast lookup mapping matching bounds
 type_string_label_dict = {}
 type_letter_code_dict = {}
 if not df_all_types.empty:
@@ -121,7 +120,7 @@ if not df_all_types.empty:
         type_string_label_dict[code] = full_type_str
         type_letter_code_dict[code] = full_type_str.split('.')[0].strip().upper() if '.' in full_type_str else full_type_str[:1].upper()
 
-# Populate the wealth lookups from the raw revenue data rows
+# Populate the wealth lookups from the raw revenue data rows using PyArrow safe formatting
 if not df_all_rev.empty:
     df_all_rev["cds_code"] = df_all_rev["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
     df_all_rev["fiscal_year"] = df_all_rev["fiscal_year"].astype(str).str.strip().str.upper()
@@ -130,13 +129,19 @@ if not df_all_rev.empty:
     df_val = df_all_rev[df_all_rev["line_no"].isin([40, "40"])].copy()
     df_inc = df_all_rev[df_all_rev["line_no"].isin([20, "20"])].copy()
     
-    val_lookup = dict(zip(df_val["cds_code"] + "_" + df_val["fiscal_year"], df_val["amount"]))
-    inc_lookup = dict(zip(df_inc["cds_code"] + "_" + df_inc["fiscal_year"], df_inc["amount"]))
+    # FIX: Use safe .str.cat method to join text keys securely under PyArrow structures
+    val_keys = df_val["cds_code"].str.cat(df_val["fiscal_year"], sep="_")
+    inc_keys = df_inc["cds_code"].str.cat(df_inc["fiscal_year"], sep="_")
+    
+    val_lookup = dict(zip(val_keys, df_val["amount"]))
+    inc_lookup = dict(zip(inc_keys, df_inc["amount"]))
 else:
     val_lookup, inc_lookup = {}, {}
 
 df_all_summary["fiscal_year"] = df_all_summary["fiscal_year"].astype(str).str.strip().str.upper()
-df_all_summary["lookup_key"] = df_all_summary["cds_code"] + "_" + df_all_summary["fiscal_year"]
+
+# FIX: Safely construct key matrix link via the .str.cat function to prevent string addition crashes
+df_all_summary["lookup_key"] = df_all_summary["cds_code"].str.cat(df_all_summary["fiscal_year"], sep="_")
 df_all_summary["equalized_valuation"] = df_all_summary["lookup_key"].map(lambda x: val_lookup.get(x, 0.0))
 df_all_summary["district_income"] = df_all_summary["lookup_key"].map(lambda x: inc_lookup.get(x, 0.0))
 
@@ -147,21 +152,26 @@ for target in ["adequacy_budget", "uncapped_aid", "actual_net_payout", "s2_adjus
 df_all_summary["lfs_delta"] = df_all_summary["actual_tax_levy"] - df_all_summary["local_fair_share"]
 df_all_summary["assigned_ld"] = df_all_summary["cds_code"].map(lambda x: f"District {leg_dict.get(x)}" if leg_dict.get(x) else "Unassigned LD")
 
-# Map both the full descriptive label AND the single-character join code to every financial row
 df_all_summary["assigned_type_label"] = df_all_summary["cds_code"].map(lambda x: type_string_label_dict.get(x, "E. K-12 / 0 - 1800"))
 df_all_summary["assigned_type_letter"] = df_all_summary["cds_code"].map(lambda x: type_letter_code_dict.get(x, "E"))
 df_all_summary["assigned_county"] = df_all_summary["cds_code"].map(lambda x: NJ_COUNTY_PREFIXES.get(x[:2], "Unassigned"))
 
-# Build dropdown array selection option boundaries
+# Build master lists
 master_ld_options = sorted(list(set(df_all_summary[df_all_summary["assigned_ld"] != "Unassigned LD"]["assigned_ld"].dropna())))
 
-# Generate the unique descriptive dropdown labels directly from the mapping file rows
-if not df_all_types.empty:
+if not df_all_types.empty and "district_type" in df_all_types.columns:
     master_type_options = sorted(list(set(df_all_types["district_type"].astype(str).str.strip().dropna())))
     if "Statewide General Context" in master_type_options: master_type_options.remove("Statewide General Context")
     if "district_type" in master_type_options: master_type_options.remove("district_type")
 else:
     master_type_options = ["E. K-12 / 0 - 1800"]
+
+# Pre-flight diagnostic panel
+with st.expander("🔍 Live Database Connection Diagnostic Pre-Flight Logs", expanded=False):
+    col_d1, col_d2, col_d3 = st.columns(3)
+    col_d1.metric("Financial Ledger Rows", f"{len(df_all_summary)} rows")
+    col_d2.metric("Revenue Cross-Map Rows", f"{len(df_all_rev)} rows")
+    col_d3.metric("District Type Map Rows", f"{len(df_all_types)} rows")
 
 # -----------------------------------------------------------------------------
 # 3. ADVANCED HIERARCHICAL CASCADING HEADER FILTERS
@@ -175,13 +185,11 @@ with st.container():
     with f_col1: sel_ld = st.selectbox("1️⃣ Legislative Filter:", ["All Legislative Districts"] + master_ld_options, index=0)
     with f_col2: sel_type_label = st.selectbox("2️⃣ District Type Filter:", ["All District Types"] + master_type_options, index=0)
 
-    # Process the cascading slice using character-matching rules
     df_cascade = df_all_summary.copy()
     if sel_ld != "All Legislative Districts": 
         df_cascade = df_cascade[df_cascade["assigned_ld"] == sel_ld]
         
     if sel_type_label != "All District Types": 
-        # Isolate the leading character token (e.g. "E") to execute a bulletproof join
         target_letter = sel_type_label.split('.')[0].strip().upper() if '.' in sel_type_label else sel_type_label[:1].upper()
         df_cascade = df_cascade[df_cascade["assigned_type_letter"] == target_letter]
 
@@ -267,8 +275,6 @@ with tab1:
 
     # --- TIER 2: COHORT PEER GROUP AVERAGE ---
     st.markdown("#### 👥 Peer Group Benchmark Aggregator & Comparative Performance Matrix")
-    
-    # Establish dynamic fallbacks
     target_peer_ld = sel_ld if sel_ld != "All Legislative Districts" else (current_active_ld if current_active_ld else "All Legislative Districts")
     
     if sel_type_label != "All District Types":
