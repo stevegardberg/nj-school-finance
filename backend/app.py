@@ -30,21 +30,19 @@ def fetch_all_districts_metadata_live():
     """Queries the live table using multi-page offset streams to bypass server caps entirely."""
     all_records = []
     page = 0
-    page_size = 1000  # Pulling standard maximum blocks allowed by server safety controls
+    page_size = 1000  
     
     try:
         while True:
-            # Shift the page viewing windows incrementally (0-999, then 1000-1999, etc.)
             offset = page * page_size
             url = f"{SUPABASE_URL}?select=cds_code,district_name&limit={page_size}&offset={offset}"
             response = requests.get(url, headers=headers, timeout=10)
             
             if response.status_code == 200:
                 page_data = response.json()
-                if not page_data:  # Break out the moment a page returns completely empty
+                if not page_data:  
                     break
                 all_records.extend(page_data)
-                # Defensive check: if it returns fewer than 1000 rows, we've hit the very end of the database
                 if len(page_data) < page_size:
                     break
                 page += 1
@@ -136,20 +134,41 @@ with tab1:
     
     if raw_rows:
         df_ledger = pd.DataFrame(raw_rows)
-        display_cols = ["fiscal_year", "actual_state_aid", "adequacy_budget", "uncapped_aid", "local_fair_share", "equalized_valuation", "district_income"]
+        
+        # Comprehensive layout array targeting the new payout tracking spine
+        display_cols = [
+            "fiscal_year", 
+            "uncapped_aid", 
+            "s2_adjustment",
+            "actual_net_payout", 
+            "adequacy_budget", 
+            "local_fair_share", 
+            "equalized_valuation", 
+            "district_income"
+        ]
+        
         existing_cols = [col for col in display_cols if col in df_ledger.columns]
         df_render = df_ledger[existing_cols].copy()
         
+        # Clean corporate presentation formatting map
         rename_map = {
-            "fiscal_year": "Fiscal Year", "actual_state_aid": "Actual K-12 State Aid", "adequacy_budget": "Adequacy Budget Base",
-            "uncapped_aid": "Uncapped Aid Formulation", "local_fair_share": "Local Fair Share (LFS)",
-            "equalized_valuation": "Equalized Property Valuation", "district_income": "Aggregate District Income"
+            "fiscal_year": "Fiscal Year", 
+            "uncapped_aid": "Uncapped SFRA Formula Target", 
+            "s2_adjustment": "Legislative S2 Adjustment Delta",
+            "actual_net_payout": "Actual Funding Net Payout", 
+            "adequacy_budget": "Adequacy Budget Base",
+            "local_fair_share": "Local Fair Share (LFS)",
+            "equalized_valuation": "Equalized Property Valuation", 
+            "district_income": "Aggregate District Income"
         }
         df_render.rename(columns=rename_map, inplace=True)
         
+        # Currency rendering wrapper
         for col in df_render.columns:
             if col != "Fiscal Year":
-                df_render[col] = df_render[col].apply(lambda x: f"${float(x):,.2f}" if pd.notnull(x) else "$0.00")
+                df_render[col] = df_render[col].apply(
+                    lambda x: f"${float(x):,.2f}" if pd.notnull(x) and str(x).strip() != "" else "$0.00"
+                )
         st.write(df_render.to_html(index=False, escape=False), unsafe_allow_html=True)
     else:
         st.warning("⏳ Selecting a valid active lookup path to stream database rows...")
