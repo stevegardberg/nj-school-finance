@@ -2,10 +2,14 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import requests
-import time
 
 # Set page configuration to maximum wide-mode for 12-column high spreadsheet density
 st.set_page_config(layout="wide")
+
+# Force-clear any internal Streamlit memory buffers on startup to guarantee a fresh data pull
+if 'initialized' not in st.session_state:
+    st.cache_data.clear()
+    st.session_state['initialized'] = True
 
 # -----------------------------------------------------------------------------
 # 1. LIVE SECURE DATABASE HANDSHAKE WITH SYSTEM RESILIENCY
@@ -33,20 +37,17 @@ NJ_COUNTY_PREFIXES = {
     "33": "Salem", "35": "Somerset", "37": "Sussex", "39": "Union", "41": "Warren"
 }
 
-def fetch_supabase_table_data(base_url, force_refresh=False):
-    """Paginates and extracts complete datasets safely with a cache-busting network token."""
+def fetch_supabase_table_data(base_url):
+    """Paginates and extracts complete datasets safely using strict, clean PostgREST URL syntax."""
     all_records = []
     page = 0
     page_size = 1000  
-    
-    # Add a dynamic timestamp parameter to force HTTP gateways to fetch live rows
-    cache_buster = f"&cb={int(time.time())}" if force_refresh else ""
-    
     try:
         while True:
             offset = page * page_size
             join_char = "&" if "?" in base_url else "?"
-            url = f"{base_url}{join_char}limit={page_size}&offset={offset}{cache_buster}"
+            # REMOVED CACHE BUSTER: Keeps the URL strictly compliant with Supabase columns
+            url = f"{base_url}{join_char}limit={page_size}&offset={offset}"
             response = requests.get(url, headers=headers, timeout=12)
             if response.status_code == 200:
                 page_data = response.json()
@@ -90,16 +91,15 @@ def clean_html_currency_formatter(df):
     return df_formatted.to_html(index=False, escape=False)
 
 # -----------------------------------------------------------------------------
-# 2. RUN LIVE DATA FETCHING WITH EXPLICIT CACHE BUSTING
+# 2. RUN LIVE CLEAN DATA FETCHING Pass
 # -----------------------------------------------------------------------------
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
-st.markdown("**NJASBO 2026 Presentation Engine (Live Cache-Busting Run)**")
+st.markdown("**NJASBO 2026 Presentation Engine (Validated REST Routing Run)**")
 
-# Force full live network downloads by passing True to our query utility
-raw_summary = fetch_supabase_table_data(SUPABASE_URL_SUMMARY, force_refresh=True)
-raw_mapping = fetch_supabase_table_data(SUPABASE_URL_MAPPING, force_refresh=True)
-raw_types = fetch_supabase_table_data(SUPABASE_URL_DIST_TYPE, force_refresh=True)
-raw_revenue = fetch_supabase_table_data(SUPABASE_URL_REVENUE, force_refresh=True)
+raw_summary = fetch_supabase_table_data(SUPABASE_URL_SUMMARY)
+raw_mapping = fetch_supabase_table_data(SUPABASE_URL_MAPPING)
+raw_types = fetch_supabase_table_data(SUPABASE_URL_DIST_TYPE)
+raw_revenue = fetch_supabase_table_data(SUPABASE_URL_REVENUE)
 
 if not raw_summary or not raw_types:
     st.error("⏳ Pipeline stalled. Key data fields returned empty arrays from the cloud data server.")
@@ -172,7 +172,9 @@ master_type_options = sorted(list(set(df_types_base["district_type"].dropna())))
 with st.container():
     r_col1, r_col2 = st.columns([6, 1])
     with r_col2:
-        if st.button("🔄 Reset All Filters", use_container_width=True): st.rerun()
+        if st.button("🔄 Reset All Filters", use_container_width=True): 
+            st.cache_data.clear()
+            st.rerun()
 
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     
@@ -269,7 +271,7 @@ with tab1:
             current_active_ld = df_district_raw["assigned_ld"].iloc[0]
             current_active_type_letter = df_district_raw["type_letter"].iloc[0]
     else:
-        st.info("💡 Select a local target district above to view the multi-year calculation ledger.")
+        st.info("💡 Select a local target district above to initialize the multi-year calculation ledger.")
 
     st.markdown("<br><hr>", unsafe_allow_html=True)
 
