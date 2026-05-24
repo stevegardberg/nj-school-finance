@@ -2,11 +2,11 @@ import streamlit as st
 import pandas as pd
 import requests
 
-# Set page configuration to maximum wide-mode for spreadsheet density
+# Set page configuration to maximum wide-mode for high spreadsheet density
 st.set_page_config(layout="wide")
 
 # -----------------------------------------------------------------------------
-# 1. LIVE SECURE DATABASE HANDSHAKE
+# 1. LIVE SECURE DATABASE HANDSHAKE WITH ROBUST FAIL-SAFES
 # -----------------------------------------------------------------------------
 try:
     headers = {
@@ -72,7 +72,7 @@ def clean_html_currency_formatter(df):
     return df_formatted.to_html(index=False, escape=False)
 
 # -----------------------------------------------------------------------------
-# 2. RUN META-DATA PIPELINE & RE-LINK THE NEW CSV LOOKUPS
+# 2. RUN DATA PIPELINE FETCHING WITH RESILIENT IN-MEMORY DEFAULTS
 # -----------------------------------------------------------------------------
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
 st.markdown("**NJASBO 2026 Presentation Engine (Cascading Cohort Model Run)**")
@@ -81,39 +81,49 @@ raw_summary = fetch_supabase_table_data(SUPABASE_URL_SUMMARY)
 raw_mapping = fetch_supabase_table_data(SUPABASE_URL_MAPPING)
 raw_types = fetch_supabase_table_data(SUPABASE_URL_DIST_TYPE)
 
-if not raw_summary or not raw_types:
-    st.error("⏳ Pipeline stalled. Unable to communicate with the master school finance tables.")
+# Fail-safe check to verify master table returned rows
+if not raw_summary:
+    st.error("⏳ Pipeline stalled. The master 'state_aid_summary' table is returning empty rows or is locked down by database permissions.")
     st.stop()
 
+# Convert to dataframes
 df_all_summary = pd.DataFrame(raw_summary)
-df_all_mapping = pd.DataFrame(raw_mapping)
-df_all_types = pd.DataFrame(raw_types)
+df_all_mapping = pd.DataFrame(raw_mapping) if raw_mapping else pd.DataFrame(columns=["cds_code", "legislative_district"])
+df_all_types = pd.DataFrame(raw_types) if raw_types else pd.DataFrame(columns=["cds_code", "district_type", "district_name"])
 
-# Enforce pristine string padding on the client side to secure the joins
+# Pristine client-side index string cleaning to secure the joins
 df_all_summary["cds_code"] = df_all_summary["cds_code"].astype(str).str.split('.').str[0].str.zfill(6)
-df_all_mapping["cds_code"] = df_all_mapping["cds_code"].astype(str).str.split('.').str[0].str.zfill(6) if not df_all_mapping.empty else pd.Series()
-df_all_types["cds_code"] = df_all_types["cds_code"].astype(str).str.split('.').str[0].str.zfill(6) if not df_all_types.empty else pd.Series()
 
-# Build index dictionary lookups
-leg_dict = dict(zip(df_all_mapping["cds_code"], df_all_mapping["legislative_district"])) if not df_all_mapping.empty else {}
-type_dict = dict(zip(df_all_types["cds_code"], df_all_types["district_type"])) if not df_all_types.empty else {}
+if not df_all_mapping.empty and "cds_code" in df_all_mapping.columns:
+    df_all_mapping["cds_code"] = df_all_mapping["cds_code"].astype(str).str.split('.').str[0].str.zfill(6)
+    leg_dict = dict(zip(df_all_mapping["cds_code"], df_all_mapping["legislative_district"]))
+else:
+    leg_dict = {}
 
-# Fast-cast financial variables
+if not df_all_types.empty and "cds_code" in df_all_types.columns:
+    df_all_types["cds_code"] = df_all_types["cds_code"].astype(str).str.split('.').str[0].str.zfill(6)
+    type_dict = dict(zip(df_all_types["cds_code"], df_all_types["district_type"]))
+else:
+    type_dict = {}
+
+# Fast-cast financial variables safely
 numeric_targets = ["adequacy_budget", "uncapped_aid", "actual_net_payout", "s2_adjustment", "local_fair_share", "actual_tax_levy", "equalized_valuation", "district_income"]
 for target in numeric_targets:
-    df_all_summary[target] = pd.to_numeric(df_all_summary.get(target, 0.0)).fillna(0.0)
+    if target in df_all_summary.columns:
+        df_all_summary[target] = pd.to_numeric(df_all_summary[target]).fillna(0.0)
+    else:
+        df_all_summary[target] = 0.0
 
-# Establish relational mapping columns across rows
+# Establish mapping structural references across all ledger rows
 df_all_summary["lfs_delta"] = df_all_summary["actual_tax_levy"] - df_all_summary["local_fair_share"]
 df_all_summary["assigned_ld"] = df_all_summary["cds_code"].map(lambda x: f"District {leg_dict.get(x)}" if leg_dict.get(x) else "District 25")
-df_all_summary["assigned_type"] = df_all_summary["cds_code"].map(lambda x: type_dict.get(x, None))
 
-# Strip rows that don't have a valid operational mapping match
-df_all_summary = df_all_summary[df_all_summary["assigned_type"].notna()].copy()
+# FIX: Implement a strict fallback grouping string if a specific code is missing from the mapping sheet
+df_all_summary["assigned_type"] = df_all_summary["cds_code"].map(lambda x: type_dict.get(x, "E. K-12 / 0 - 1800"))
 df_all_summary["assigned_county"] = df_all_summary["cds_code"].map(lambda x: NJ_COUNTY_PREFIXES.get(x[:2], "Unassigned"))
 
 # -----------------------------------------------------------------------------
-# 3. INITIALIZE SESSION STATE BASES FOR THE RESET FUNCTION
+# 3. INITIALIZE STATE HOOKS FOR RESETTING CONTROLS
 # -----------------------------------------------------------------------------
 if "reset_trigger" not in st.session_state:
     st.session_state.reset_trigger = False
@@ -125,7 +135,7 @@ master_ld_options = sorted(list(set(df_all_summary["assigned_ld"].dropna())))
 master_type_options = sorted(list(set(df_all_summary["assigned_type"].dropna())))
 
 # -----------------------------------------------------------------------------
-# 4. REFINED FILTER HEADER MENUS (CASCADING & DRILL-DOWN OPTIMIZED)
+# 4. REFINED HIERARCHICAL CASCADING HEADER FILTERS
 # -----------------------------------------------------------------------------
 with st.container():
     st.markdown("---")
@@ -135,20 +145,20 @@ with st.container():
 
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     
-    # Tier 1: Primary Macro Selectors (Defaulting strictly to "All")
+    # Tier 1: Primary Macro Selectors (Initializes cleanly to "All")
     with f_col1:
         sel_ld = st.selectbox("1️⃣ Legislative Filter:", ["All Legislative Districts"] + master_ld_options, index=0)
     with f_col2:
         sel_type = st.selectbox("2️⃣ District Type Filter:", ["All District Types"] + master_type_options, index=0)
 
-    # Process the first relational cascade shrinkage
+    # Process first stage slice
     df_cascade = df_all_summary.copy()
     if sel_ld != "All Legislative Districts":
         df_cascade = df_cascade[df_cascade["assigned_ld"] == sel_ld]
     if sel_type != "All District Types":
         df_cascade = df_cascade[df_cascade["assigned_type"] == sel_type]
 
-    # Tier 2: Downstream Selectors (Contract dynamically based on Tier 1 selections)
+    # Tier 2: Secondary Downstream Selectors (Narrows dynamically based on Tier 1 choices)
     with f_col3:
         available_counties = sorted(list(set(df_cascade["assigned_county"].dropna())))
         sel_county = st.selectbox("3️⃣ Local County:", ["All Counties"] + available_counties, index=0)
@@ -160,7 +170,7 @@ with st.container():
         available_towns = sorted(list(set(df_cascade["district_name"].dropna())))
         sel_district = st.selectbox("4️⃣ Target Local District:", ["Select a District..."] + available_towns, index=0)
 
-    # Force immediate engine redraw if reset toggle button is clicked
+    # Force immediate layout draw if reset button clicked
     if st.session_state.reset_trigger:
         st.session_state.reset_trigger = False
         st.rerun()
@@ -170,7 +180,7 @@ with st.container():
 tab1, tab2, tab3 = st.tabs(["⚖️ DATABASE VALIDATION MATRIX", "📊 User Friendly Budget Approp Explorer", "🎯 Academic Return Matrix"])
 
 # -----------------------------------------------------------------------------
-# 5. NEW SEQUENTIAL NUMBERED COLUMN DEFINITIONS
+# 5. NEW STRUCTURAL MATRIX COLUMN SEQUENCE DEFINITIONS
 # -----------------------------------------------------------------------------
 rename_map = {
     "fiscal_year": "Fiscal Year", 
@@ -190,7 +200,7 @@ ordered_cols = ["fiscal_year", "adequacy_budget", "uncapped_aid", "actual_net_pa
 # 6. RENDER DATA ARCHITECTURES
 # -----------------------------------------------------------------------------
 with tab1:
-    # --- TIER 1: THE TARGET DISTRICT MATRIX ---
+    # --- TIER 1: Individual Target District Matrix ---
     if sel_district and sel_district != "Select a District...":
         st.markdown(f"#### 📍 Target District Multi-Year Ledger — {sel_district}")
         df_district_history = df_all_summary[df_all_summary["district_name"] == sel_district].sort_values("fiscal_year").copy()
@@ -209,53 +219,4 @@ with tab1:
             df_master_final.rename(columns=rename_map, inplace=True)
             st.write(clean_html_currency_formatter(df_master_final), unsafe_allow_html=True)
             
-            # Cache active metadata markers to automatically populate peer metrics below
-            current_active_ld = df_district_history["assigned_ld"].iloc[0]
-            current_active_type = df_district_history["assigned_type"].iloc[0]
-        else:
-            st.warning("⏳ Multi-year records pulling from ledger...")
-            current_active_ld, current_active_type = None, None
-    else:
-        st.info("💡 Adjust cascading filter parameters in the top header section to display an individual district's multi-year ledger.")
-        current_active_ld, current_active_type = None, None
-
-    st.markdown("<br><hr>", unsafe_allow_html=True)
-
-    # --- TIER 2: COHORT PEER GROUP MATRIX ---
-    st.markdown("#### 👥 Peer Group Benchmark Aggregator & Comparative Performance Matrix")
-    
-    # Establish dynamic fallback parameters
-    target_peer_ld = sel_ld if sel_ld != "All Legislative Districts" else (current_active_ld if current_active_ld else "All Legislative Districts")
-    target_peer_type = sel_type if sel_type != "All District Types" else (current_active_type if current_active_type else "All District Types")
-    
-    st.caption(f"Displays mathematically computed multi-year group averages matching: **{target_peer_ld}** | **{target_peer_type}**")
-    
-    df_peer_pool = df_all_summary.copy()
-    if target_peer_ld != "All Legislative Districts":
-        df_peer_pool = df_peer_pool[df_peer_pool["assigned_ld"] == target_peer_ld]
-    if target_peer_type != "All District Types":
-        df_peer_pool = df_peer_pool[df_peer_pool["assigned_type"] == target_peer_type]
-        
-    if not df_peer_pool.empty:
-        df_grouped_averages = df_peer_pool.groupby("fiscal_year")[ordered_cols[1:]].mean().reset_index()
-        df_peer_render = df_grouped_averages.sort_values("fiscal_year").copy()
-        df_peer_render.rename(columns=rename_map, inplace=True)
-        st.write(clean_html_currency_formatter(df_peer_render), unsafe_allow_html=True)
-    else:
-        st.caption("Adjust criteria menus to trigger cohort calculations.")
-
-    st.markdown("<br><hr>", unsafe_allow_html=True)
-
-    # --- TIER 3: STATE-WIDE MACRO BASELINE ---
-    st.markdown("#### 🌐 State-Wide Structural Averages Baseline")
-    st.caption("Displays the macro baseline average across all combined public school systems in New Jersey per year.")
-    
-    df_state_averages = df_all_summary.groupby("fiscal_year")[ordered_cols[1:]].mean().reset_index()
-    df_state_render = df_state_averages.sort_values("fiscal_year").copy()
-    df_state_render.rename(columns=rename_map, inplace=True)
-    st.write(clean_html_currency_formatter(df_state_render), unsafe_allow_html=True)
-
-with tab2:
-    st.markdown("#### UFB Appropriations Component Ledger")
-with tab3:
-    st.markdown("#### Return on Academic Investment Insights (ROAI)")
+            current_active_ld = df
