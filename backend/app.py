@@ -135,7 +135,18 @@ with tab1:
     if raw_rows:
         df_ledger = pd.DataFrame(raw_rows)
         
-        # Comprehensive layout array targeting the new payout tracking spine
+        # Safe numeric casting to prevent formatting crash loops on empty/missing rows
+        numeric_targets = ["uncapped_aid", "s2_adjustment", "actual_net_payout", "adequacy_budget", "local_fair_share", "equalized_valuation", "district_income", "actual_tax_levy"]
+        for target in numeric_targets:
+            if target in df_ledger.columns:
+                df_ledger[target] = pd.to_numeric(df_ledger[target]).fillna(0.0)
+            else:
+                df_ledger[target] = 0.0
+
+        # Calculate the dynamic Over/(Under) Local Fair Share vector on the fly
+        df_ledger["lfs_delta"] = df_ledger["actual_tax_levy"] - df_ledger["local_fair_share"]
+        
+        # Comprehensive layout tracking array
         display_cols = [
             "fiscal_year", 
             "uncapped_aid", 
@@ -143,6 +154,8 @@ with tab1:
             "actual_net_payout", 
             "adequacy_budget", 
             "local_fair_share", 
+            "actual_tax_levy",
+            "lfs_delta",
             "equalized_valuation", 
             "district_income"
         ]
@@ -150,7 +163,21 @@ with tab1:
         existing_cols = [col for col in display_cols if col in df_ledger.columns]
         df_render = df_ledger[existing_cols].copy()
         
-        # Clean corporate presentation formatting map
+        # Compute exact aggregate column summaries for the footer row target arrays
+        total_s2_delta = df_render["s2_adjustment"].sum()
+        total_lfs_delta = df_render["lfs_delta"].sum()
+
+        # Build a fresh summary row dictionary structured cleanly to line up under headers
+        summary_row = {col: "" for col in existing_cols}
+        summary_row["fiscal_year"] = "<b>TOTAL SUMMARY</b>"
+        summary_row["s2_adjustment"] = f"<b>{total_s2_delta}</b>"
+        summary_row["lfs_delta"] = f"<b>{total_lfs_delta}</b>"
+        
+        # Append summary row to the bottom using Pandas concatenation path
+        df_summary = pd.DataFrame([summary_row])
+        df_final = pd.concat([df_render, df_summary], ignore_index=True)
+
+        # Corporate Presentation Header Mapping Grid
         rename_map = {
             "fiscal_year": "Fiscal Year", 
             "uncapped_aid": "Uncapped SFRA Formula Target", 
@@ -158,18 +185,33 @@ with tab1:
             "actual_net_payout": "Actual Funding Net Payout", 
             "adequacy_budget": "Adequacy Budget Base",
             "local_fair_share": "Local Fair Share (LFS)",
+            "actual_tax_levy": "Actual Local Tax Levy",
+            "lfs_delta": "Amt Over/(Under) LFS",
             "equalized_valuation": "Equalized Property Valuation", 
             "district_income": "Aggregate District Income"
         }
-        df_render.rename(columns=rename_map, inplace=True)
+        df_final.rename(columns=rename_map, inplace=True)
         
-        # Currency rendering wrapper
-        for col in df_render.columns:
+        # Clean currency formatting parser loop
+        for col in df_final.columns:
             if col != "Fiscal Year":
-                df_render[col] = df_render[col].apply(
-                    lambda x: f"${float(x):,.2f}" if pd.notnull(x) and str(x).strip() != "" else "$0.00"
-                )
-        st.write(df_render.to_html(index=False, escape=False), unsafe_allow_html=True)
+                def format_cell(x):
+                    if pd.isnull(x) or str(x).strip() == "":
+                        return "$0.00"
+                    val_str = str(x).replace("<b>", "").replace("</b>", "").strip()
+                    if val_str == "":
+                        return ""
+                    try:
+                        val_float = float(val_str)
+                        formatted_val = f"${val_float:,.2f}" if val_float >= 0 else f"$-{abs(val_float):,.2f}"
+                        if "<b>" in str(x):
+                            return f"<b>{formatted_val}</b>"
+                        return formatted_val
+                    except ValueError:
+                        return str(x)
+                df_final[col] = df_final[col].apply(format_cell)
+                
+        st.write(df_final.to_html(index=False, escape=False), unsafe_allow_html=True)
     else:
         st.warning("⏳ Selecting a valid active lookup path to stream database rows...")
 
