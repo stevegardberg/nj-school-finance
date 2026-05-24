@@ -22,6 +22,7 @@ SUPABASE_PROJECT_ID = "exqwkzidanuywriatmhi"
 SUPABASE_URL_SUMMARY = f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1/state_aid_summary"
 SUPABASE_URL_MAPPING = f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1/legislative_mapping"
 SUPABASE_URL_DIST_TYPE = f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1/district_metadata_mapping"
+SUPABASE_URL_REVENUE = f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1/revenue"
 
 NJ_COUNTY_PREFIXES = {
     "01": "Atlantic", "03": "Bergen", "05": "Burlington", "07": "Camden",
@@ -60,29 +61,22 @@ def clean_html_currency_formatter(df):
         if col != "Fiscal Year":
             def format_cell(x):
                 if pd.isnull(x) or str(x).strip() in ["", "nan", "None"]:
-                    return "$0.00" if "%" not in col and "Rate" not in col else "0.00%" if "%" in col else "0.00"
+                    return "$0.00" if "%" not in col and "Rate" not in col else "0.00%" if "%" in col else "0.0000"
                 
                 raw_str = str(x).replace("<b>", "").replace("</b>", "").strip()
-                
-                # If it's already a formatted string row bypass processing
                 if any(marker in raw_str for marker in ["$", "%", "TOTAL"]):
                     return str(x)
                     
                 try:
                     val_float = float(raw_str)
-                    
-                    # Handle Percentage Change Columns
                     if "%" in col:
                         formatted_val = f"{val_float:+.2f}%" if val_float != 0 else "0.00%"
-                    # Handle Tax Rate per $100 Columns
                     elif "Rate" in col:
                         formatted_val = f"${val_float:,.4f}"
-                    # Handle Standard Currency Columns
                     else:
                         formatted_val = f"${val_float:,.2f}" if val_float >= 0 else f"$-{abs(val_float):,.2f}"
                         
-                    if "<b>" in str(x): 
-                        return f"<b>{formatted_val}</b>"
+                    if "<b>" in str(x): return f"<b>{formatted_val}</b>"
                     return formatted_val
                 except ValueError:
                     return str(x)
@@ -90,54 +84,84 @@ def clean_html_currency_formatter(df):
     return df_formatted.to_html(index=False, escape=False)
 
 # -----------------------------------------------------------------------------
-# 2. RUN DATA PIPELINE FETCHING
+# 2. RUN DATA PIPELINE FETCHING & MULTI-TABLE MESH RELINKING
 # -----------------------------------------------------------------------------
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
-st.markdown("**NJASBO 2026 Presentation Engine (Expanded 12-Column Calculation Matrix)**")
+st.markdown("**NJASBO 2026 Presentation Engine (Hierarchical Character Normalization)**")
 
 raw_summary = fetch_supabase_table_data(SUPABASE_URL_SUMMARY)
 raw_mapping = fetch_supabase_table_data(SUPABASE_URL_MAPPING)
 raw_types = fetch_supabase_table_data(SUPABASE_URL_DIST_TYPE)
+raw_revenue = fetch_supabase_table_data(SUPABASE_URL_REVENUE)
 
 if not raw_summary:
     st.error("⏳ Pipeline stalled. The master 'state_aid_summary' table is returning empty rows.")
     st.stop()
 
-# Convert to dataframes
 df_all_summary = pd.DataFrame(raw_summary)
 df_all_mapping = pd.DataFrame(raw_mapping) if raw_mapping else pd.DataFrame(columns=["cds_code", "legislative_district"])
 df_all_types = pd.DataFrame(raw_types) if raw_types else pd.DataFrame(columns=["cds_code", "district_type", "district_name"])
+df_all_rev = pd.DataFrame(raw_revenue) if raw_revenue else pd.DataFrame(columns=["cds_code", "fiscal_year", "line_no", "amount"])
 
-# Pre-flight diagnostic panel
-with st.expander("🔍 Live Database Connection Diagnostic Pre-Flight Logs", expanded=False):
-    col_d1, col_d2, col_d3 = st.columns(3)
-    col_d1.metric("Financial Ledger Rows", f"{len(df_all_summary)} rows")
-    col_d2.metric("Legislative Map Rows", f"{len(df_all_mapping)} rows")
-    col_d3.metric("District Type Map Rows", f"{len(df_all_types)} rows")
-
-# Enforce clean padded keys
+# Standardize text strings
 df_all_summary["cds_code"] = df_all_summary["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
 if not df_all_mapping.empty: df_all_mapping["cds_code"] = df_all_mapping["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
 if not df_all_types.empty: df_all_types["cds_code"] = df_all_types["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
 
+# Build basic dictionaries
 leg_dict = dict(zip(df_all_mapping["cds_code"], df_all_mapping["legislative_district"].astype(str).str.strip())) if not df_all_mapping.empty else {}
-type_dict = dict(zip(df_all_types["cds_code"], df_all_types["district_type"].astype(str).str.strip())) if not df_all_types.empty else {}
 
-# Fast-cast numeric variables safely
-base_financial_cols = ["adequacy_budget", "uncapped_aid", "actual_net_payout", "s2_adjustment", "local_fair_share", "actual_tax_levy", "equalized_valuation", "district_income"]
-for target in base_financial_cols:
+# HARDENED ALIGNMENT FIX: Create two dictionaries—one for the full string label, and one for just the first letter character
+type_string_label_dict = {}
+type_letter_code_dict = {}
+if not df_all_types.empty:
+    for _, row in df_all_types.iterrows():
+        code = str(row["cds_code"]).strip().zfill(6)[:6]
+        full_type_str = str(row["district_type"]).strip()
+        type_string_label_dict[code] = full_type_str
+        type_letter_code_dict[code] = full_type_str.split('.')[0].strip().upper() if '.' in full_type_str else full_type_str[:1].upper()
+
+# Populate the wealth lookups from the raw revenue data rows
+if not df_all_rev.empty:
+    df_all_rev["cds_code"] = df_all_rev["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
+    df_all_rev["fiscal_year"] = df_all_rev["fiscal_year"].astype(str).str.strip().str.upper()
+    df_all_rev["amount"] = pd.to_numeric(df_all_rev["amount"]).fillna(0.0)
+    
+    df_val = df_all_rev[df_all_rev["line_no"].isin([40, "40"])].copy()
+    df_inc = df_all_rev[df_all_rev["line_no"].isin([20, "20"])].copy()
+    
+    val_lookup = dict(zip(df_val["cds_code"] + "_" + df_val["fiscal_year"], df_val["amount"]))
+    inc_lookup = dict(zip(df_inc["cds_code"] + "_" + df_inc["fiscal_year"], df_inc["amount"]))
+else:
+    val_lookup, inc_lookup = {}, {}
+
+df_all_summary["fiscal_year"] = df_all_summary["fiscal_year"].astype(str).str.strip().str.upper()
+df_all_summary["lookup_key"] = df_all_summary["cds_code"] + "_" + df_all_summary["fiscal_year"]
+df_all_summary["equalized_valuation"] = df_all_summary["lookup_key"].map(lambda x: val_lookup.get(x, 0.0))
+df_all_summary["district_income"] = df_all_summary["lookup_key"].map(lambda x: inc_lookup.get(x, 0.0))
+
+# Fast-cast financial numbers safely
+for target in ["adequacy_budget", "uncapped_aid", "actual_net_payout", "s2_adjustment", "local_fair_share", "actual_tax_levy", "equalized_valuation", "district_income"]:
     df_all_summary[target] = pd.to_numeric(df_all_summary.get(target, 0.0)).fillna(0.0)
 
 df_all_summary["lfs_delta"] = df_all_summary["actual_tax_levy"] - df_all_summary["local_fair_share"]
 df_all_summary["assigned_ld"] = df_all_summary["cds_code"].map(lambda x: f"District {leg_dict.get(x)}" if leg_dict.get(x) else "Unassigned LD")
-df_all_summary["assigned_type"] = df_all_summary["cds_code"].map(lambda x: type_dict.get(x, "E. K-12 / 0 - 1800"))
+
+# Map both the full descriptive label AND the single-character join code to every financial row
+df_all_summary["assigned_type_label"] = df_all_summary["cds_code"].map(lambda x: type_string_label_dict.get(x, "E. K-12 / 0 - 1800"))
+df_all_summary["assigned_type_letter"] = df_all_summary["cds_code"].map(lambda x: type_letter_code_dict.get(x, "E"))
 df_all_summary["assigned_county"] = df_all_summary["cds_code"].map(lambda x: NJ_COUNTY_PREFIXES.get(x[:2], "Unassigned"))
 
-# Build filter array selectors
+# Build dropdown array selection option boundaries
 master_ld_options = sorted(list(set(df_all_summary[df_all_summary["assigned_ld"] != "Unassigned LD"]["assigned_ld"].dropna())))
-master_type_options = sorted(list(set(df_all_types["district_type"].astype(str).str.strip().dropna()))) if not df_all_types.empty else ["E. K-12 / 0 - 1800"]
-if "Statewide General Context" in master_type_options: master_type_options.remove("Statewide General Context")
-if "district_type" in master_type_options: master_type_options.remove("district_type")
+
+# Generate the unique descriptive dropdown labels directly from the mapping file rows
+if not df_all_types.empty:
+    master_type_options = sorted(list(set(df_all_types["district_type"].astype(str).str.strip().dropna())))
+    if "Statewide General Context" in master_type_options: master_type_options.remove("Statewide General Context")
+    if "district_type" in master_type_options: master_type_options.remove("district_type")
+else:
+    master_type_options = ["E. K-12 / 0 - 1800"]
 
 # -----------------------------------------------------------------------------
 # 3. ADVANCED HIERARCHICAL CASCADING HEADER FILTERS
@@ -149,11 +173,17 @@ with st.container():
 
     f_col1, f_col2, f_col3, f_col4 = st.columns(4)
     with f_col1: sel_ld = st.selectbox("1️⃣ Legislative Filter:", ["All Legislative Districts"] + master_ld_options, index=0)
-    with f_col2: sel_type = st.selectbox("2️⃣ District Type Filter:", ["All District Types"] + master_type_options, index=0)
+    with f_col2: sel_type_label = st.selectbox("2️⃣ District Type Filter:", ["All District Types"] + master_type_options, index=0)
 
+    # Process the cascading slice using character-matching rules
     df_cascade = df_all_summary.copy()
-    if sel_ld != "All Legislative Districts": df_cascade = df_cascade[df_cascade["assigned_ld"] == sel_ld]
-    if sel_type != "All District Types": df_cascade = df_cascade[df_cascade["assigned_type"] == sel_type]
+    if sel_ld != "All Legislative Districts": 
+        df_cascade = df_cascade[df_cascade["assigned_ld"] == sel_ld]
+        
+    if sel_type_label != "All District Types": 
+        # Isolate the leading character token (e.g. "E") to execute a bulletproof join
+        target_letter = sel_type_label.split('.')[0].strip().upper() if '.' in sel_type_label else sel_type_label[:1].upper()
+        df_cascade = df_cascade[df_cascade["assigned_type_letter"] == target_letter]
 
     with f_col3:
         available_counties = sorted(list(set(df_cascade["assigned_county"].dropna())))
@@ -170,7 +200,7 @@ with st.container():
 tab1, tab2, tab3 = st.tabs(["⚖️ DATABASE VALIDATION MATRIX", "📊 User Friendly Budget Approp Explorer", "🎯 Academic Return Matrix"])
 
 # -----------------------------------------------------------------------------
-# 4. NEW 12-COLUMN ORDERED SPECIFICATION AND RENAMING MAPS
+# 4. STRUCTURAL NARRATIVE COLUMN FORMAT MAPPING KEYS
 # -----------------------------------------------------------------------------
 rename_map = {
     "fiscal_year": "Fiscal Year",
@@ -196,29 +226,18 @@ ordered_display_cols = [
 def calculate_advanced_metrics(df_group):
     """Computes percentage changes and tax levy rate modifiers safely across year-ordered rows."""
     df = df_group.sort_values("fiscal_year").copy()
-    
-    # 1. State Aid YoY % Change calculation
     df["state_aid_pct_change"] = df["actual_net_payout"].pct_change().fillna(0.0) * 100.0
-    
-    # 2. Tax Levy YoY % Change calculation
     df["tax_levy_pct_change"] = df["actual_tax_levy"].pct_change().fillna(0.0) * 100.0
-    
-    # 3. Tax Levy per $100 of Valuation calculation
-    # Formula: (Actual Tax Levy / Equalized Valuation) * 100
-    df["tax_rate_per_100"] = np.where(
-        df["equalized_valuation"] > 0,
-        (df["actual_tax_levy"] / df["equalized_valuation"]) * 100.0,
-        0.0
-    )
+    df["tax_rate_per_100"] = np.where(df["equalized_valuation"] > 0, (df["actual_tax_levy"] / df["equalized_valuation"]) * 100.0, 0.0)
     return df
 
 # -----------------------------------------------------------------------------
-# 5. RENDER THE ANALYSIS PANELS
+# 5. RENDER PERFORMANCE GRIDS
 # -----------------------------------------------------------------------------
 with tab1:
-    current_active_ld, current_active_type = None, None
+    current_active_ld, current_active_type_letter = None, None
 
-    # --- TIER 1: INDIVIDUAL DISTRICT LEDGER ---
+    # --- TIER 1: TARGET DISTRICT LEDGER ---
     if sel_district and sel_district != "Select a District...":
         st.markdown(f"#### 📍 Target District Multi-Year Ledger — {sel_district}")
         df_district_raw = df_all_summary[df_all_summary["district_name"] == sel_district].copy()
@@ -227,7 +246,6 @@ with tab1:
             df_processed = calculate_advanced_metrics(df_district_raw)
             df_render = df_processed[ordered_display_cols].copy()
             
-            # Compute row totals
             tot_s2 = df_render["s2_adjustment"].sum()
             tot_lfs = df_render["lfs_delta"].sum()
             
@@ -241,29 +259,36 @@ with tab1:
             st.write(clean_html_currency_formatter(df_final_matrix), unsafe_allow_html=True)
             
             current_active_ld = df_district_raw["assigned_ld"].iloc[0]
-            current_active_type = df_district_raw["assigned_type"].iloc[0]
+            current_active_type_letter = df_district_raw["assigned_type_letter"].iloc[0]
     else:
-        st.info("💡 Select a local target district above to view the multi-year calculation ledger.")
+        st.info("💡 Select a local target district above to initialize the multi-year calculation ledger.")
 
     st.markdown("<br><hr>", unsafe_allow_html=True)
 
-    # --- TIER 2: COHORT PEER GROUP MATRIX ---
+    # --- TIER 2: COHORT PEER GROUP AVERAGE ---
     st.markdown("#### 👥 Peer Group Benchmark Aggregator & Comparative Performance Matrix")
+    
+    # Establish dynamic fallbacks
     target_peer_ld = sel_ld if sel_ld != "All Legislative Districts" else (current_active_ld if current_active_ld else "All Legislative Districts")
-    target_peer_type = sel_type if sel_type != "All District Types" else (current_active_type if current_active_type else "All District Types")
-    st.caption(f"Displays mathematically computed group averages matching: **{target_peer_ld}** | **{target_peer_type}**")
+    
+    if sel_type_label != "All District Types":
+        target_peer_letter = sel_type_label.split('.')[0].strip().upper() if '.' in sel_type_label else sel_type_label[:1].upper()
+    else:
+        target_peer_letter = current_active_type_letter if current_active_type_letter else "E"
+        
+    st.caption(f"Displays mathematically computed group averages matching: **{target_peer_ld}** | Cohort Letter: **{target_peer_letter}**")
     
     df_peer_pool = df_all_summary.copy()
-    if target_peer_ld != "All Legislative Districts": df_peer_pool = df_peer_pool[df_peer_pool["assigned_ld"] == target_peer_ld]
-    if target_peer_type != "All District Types": df_peer_pool = df_peer_pool[df_peer_pool["assigned_type"] == target_peer_type]
+    if target_peer_ld != "All Legislative Districts": 
+        df_peer_pool = df_peer_pool[df_peer_pool["assigned_ld"] == target_peer_ld]
+    if target_peer_letter: 
+        df_peer_pool = df_peer_pool[df_peer_pool["assigned_type_letter"] == target_peer_letter]
         
-    if not df_peer_pool.empty and (target_peer_ld != "All Legislative Districts" or target_peer_type != "All District Types"):
-        # Group by year to compute annual micro averages across the peer districts
-        df_peer_yearly = df_peer_pool.groupby("fiscal_year")[base_financial_cols + ["lfs_delta"]].mean().reset_index()
+    if not df_peer_pool.empty:
+        df_peer_yearly = df_peer_pool.groupby("fiscal_year")[["adequacy_budget", "uncapped_aid", "actual_net_payout", "s2_adjustment", "local_fair_share", "actual_tax_levy", "equalized_valuation", "district_income", "lfs_delta"]].mean().reset_index()
         df_peer_processed = calculate_advanced_metrics(df_peer_yearly)
         df_peer_render = df_peer_processed[ordered_display_cols].copy()
         
-        # REQUIREMENT: Compute row totals for the peer average matrix
         tot_peer_s2 = df_peer_render["s2_adjustment"].sum()
         tot_peer_lfs = df_peer_render["lfs_delta"].sum()
         
@@ -275,8 +300,6 @@ with tab1:
         df_peer_final = pd.concat([df_peer_render, pd.DataFrame([peer_sum_row])], ignore_index=True)
         df_peer_final.rename(columns=rename_map, inplace=True)
         st.write(clean_html_currency_formatter(df_peer_final), unsafe_allow_html=True)
-    else:
-        st.caption("Specify a primary cohort filter or select a local target district to run peer metrics.")
 
     st.markdown("<br><hr>", unsafe_allow_html=True)
 
@@ -285,11 +308,10 @@ with tab1:
     st.caption("Displays the macro baseline average across all combined public school systems in New Jersey per year.")
     
     if not df_all_summary.empty:
-        df_state_yearly = df_all_summary.groupby("fiscal_year")[base_financial_cols + ["lfs_delta"]].mean().reset_index()
+        df_state_yearly = df_all_summary.groupby("fiscal_year")[["adequacy_budget", "uncapped_aid", "actual_net_payout", "s2_adjustment", "local_fair_share", "actual_tax_levy", "equalized_valuation", "district_income", "lfs_delta"]].mean().reset_index()
         df_state_processed = calculate_advanced_metrics(df_state_yearly)
         df_state_render = df_state_processed[ordered_display_cols].copy()
         
-        # REQUIREMENT: Compute row totals for the statewide absolute baseline matrix
         tot_state_s2 = df_state_render["s2_adjustment"].sum()
         tot_state_lfs = df_state_render["lfs_delta"].sum()
         
