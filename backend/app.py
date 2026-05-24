@@ -95,7 +95,7 @@ def clean_html_currency_formatter(df):
 # 2. RUN DATA PIPELINE ACQUISITION
 # -----------------------------------------------------------------------------
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
-st.markdown("**NJASBO 2026 Presentation Engine (Absolute Isolation Run)**")
+st.markdown("**NJASBO 2026 Presentation Engine (Hardened Safe-Cast Run)**")
 
 raw_summary = fetch_supabase_table_data(SUPABASE_URL_SUMMARY)
 raw_mapping = fetch_supabase_table_data(SUPABASE_URL_MAPPING)
@@ -110,7 +110,7 @@ if df_summary_base.empty:
     st.error("⏳ Critical Error: The master financial data storage pool cannot be read.")
     st.stop()
 
-# ABSOLUTE ISOLATION SANITIZATION: Force join keys into numeric integers to bypass string formatting bugs
+# Force join keys into numeric integers to bypass string formatting bugs
 def secure_integer_cast(series):
     clean_series = series.astype(str).str.split('.').str[0].str.strip()
     return pd.to_numeric(clean_series, errors='coerce').fillna(0).astype(int)
@@ -122,8 +122,15 @@ if not df_mapping_base.empty: df_mapping_base["join_key_int"] = secure_integer_c
 # Extract county codes based on the original string positioning
 df_summary_base["county_code_string"] = df_summary_base["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:2]
 
-# Clean the lookup frame to prevent any text drift or spaces
-df_types_base["district_type"] = df_types_base["district_type"].astype(str).str.strip()
+# HARDENED COLUMN CHECK: Auto-detect if Supabase named the column something else (like 'group' or 'Group')
+detected_type_col = "district_type"
+for alternative in ["district_type", "group", "Group", "district_cohort", "type"]:
+    if alternative in df_types_base.columns:
+        detected_type_col = alternative
+        break
+
+# Normalize the column name to 'district_type' inside Python
+df_types_base["district_type"] = df_types_base[detected_type_col].astype(str).str.strip()
 df_types_base["district_name"] = df_types_base["district_name"].astype(str).str.strip()
 df_types_base["type_letter"] = df_types_base["district_type"].map(lambda x: x.split('.')[0].strip().upper() if '.' in x else x[:1].upper())
 
@@ -145,8 +152,6 @@ else:
 # -----------------------------------------------------------------------------
 # 3. COMBINE DATASETS USING ABSOLUTE ISOLATION INNER JOIN MATCHES
 # -----------------------------------------------------------------------------
-# CRITICAL FIX: Explicitly strip out ANY lingering column variables from the summary ledger 
-# to guarantee they cannot override the fresh database metadata during the merge.
 cols_to_purge = ["assigned_type", "assigned_type_label", "assigned_type_letter", "district_type", "type_letter", "district_name", "assigned_ld"]
 for col in cols_to_purge:
     if col in df_summary_base.columns:
@@ -179,16 +184,9 @@ for target in ["adequacy_budget", "uncapped_aid", "actual_net_payout", "s2_adjus
 df_joined_master["lfs_delta"] = df_joined_master["actual_tax_levy"] - df_joined_master["local_fair_share"]
 df_joined_master["assigned_county"] = df_joined_master["county_code_string"].map(lambda x: NJ_COUNTY_PREFIXES.get(x, "Unassigned"))
 
-# DYNAMIC DROPDOWN GENERATION: Create options array directly from the active, joined master set
+# Create options array directly from the successfully joined columns
 master_ld_options = sorted(list(set(df_joined_master[df_joined_master["assigned_ld"] != "Unassigned LD"]["assigned_ld"].dropna())))
 master_type_options = sorted(list(set(df_joined_master["district_type"].dropna())))
-
-# Pre-flight diagnostic panel expansion
-with st.expander("🔍 Live Database Connection Diagnostic Pre-Flight Logs", expanded=False):
-    col_d1, col_d2, col_d3 = st.columns(3)
-    col_d1.metric("Financial Ledger Rows", f"{len(df_joined_master)} rows")
-    col_d2.metric("Distinct Types Found", f"{len(master_type_options)} groups")
-    col_d3.metric("Dropdown Options Array", str(master_type_options))
 
 # -----------------------------------------------------------------------------
 # 4. ADVANCED HIERARCHICAL CASCADING HEADER FILTERS
