@@ -264,19 +264,24 @@ with tab1:
     # --- TIER 1: TARGET DISTRICT LEDGER ---
     if sel_district and sel_district != "Select a District...":
         st.markdown(f"#### 📍 Target District Multi-Year Ledger — {sel_district}")
-        df_district_raw = df_joined_master[df_joined_master["district_name"] == sel_district].copy()
+        
+        # Force strict chronological ordering by fiscal year BEFORE metrics run
+        df_district_raw = df_joined_master[df_joined_master["district_name"] == sel_district].sort_values("fiscal_year").copy()
         
         if not df_district_raw.empty:
             df_processed = calculate_advanced_metrics(df_district_raw)
             df_render = df_processed[ordered_display_cols].copy()
             
-            tot_s2 = df_render["s2_adjustment"].sum()
-            tot_lfs = df_render["lfs_delta"].sum()
+            try:
+                tot_s2 = pd.to_numeric(df_render["s2_adjustment"]).sum()
+                tot_lfs = pd.to_numeric(df_render["lfs_delta"]).sum()
+            except Exception:
+                tot_s2, tot_lfs = 0.0, 0.0
             
             sum_row = {col: "" for col in df_render.columns}
             sum_row["fiscal_year"] = "<b>TOTAL SUMMARY</b>"
-            sum_row["s2_adjustment"] = f"<b>{tot_s2}</b>"
-            sum_row["lfs_delta"] = f"<b>{tot_lfs}</b>"
+            sum_row["s2_adjustment"] = f"<b>${tot_s2:,.2f}</b>" if tot_s2 >= 0 else f"<b>$-{abs(tot_s2):,.2f}</b>"
+            sum_row["lfs_delta"] = f"<b>${tot_lfs:,.2f}</b>" if tot_lfs >= 0 else f"<b>$-{abs(tot_lfs):,.2f}</b>"
             
             df_final_matrix = pd.concat([df_render, pd.DataFrame([sum_row])], ignore_index=True)
             df_final_matrix.rename(columns=rename_map, inplace=True)
@@ -316,8 +321,8 @@ with tab1:
         
         peer_sum_row = {col: "" for col in df_peer_render.columns}
         peer_sum_row["fiscal_year"] = "<b>TOTAL SUMMARY</b>"
-        peer_sum_row["s2_adjustment"] = f"<b>{tot_peer_s2}</b>"
-        peer_sum_row["lfs_delta"] = f"<b>{tot_peer_lfs}</b>"
+        peer_sum_row["s2_adjustment"] = f"<b>${tot_peer_s2:,.2f}</b>" if tot_peer_s2 >= 0 else f"<b>$-{abs(tot_peer_s2):,.2f}</b>"
+        peer_sum_row["lfs_delta"] = f"<b>${tot_peer_lfs:,.2f}</b>" if tot_peer_lfs >= 0 else f"<b>$-{abs(tot_peer_lfs):,.2f}</b>"
         
         df_peer_final = pd.concat([df_peer_render, pd.DataFrame([peer_sum_row])], ignore_index=True)
         df_peer_final.rename(columns=rename_map, inplace=True)
@@ -339,8 +344,8 @@ with tab1:
         
         state_sum_row = {col: "" for col in df_state_render.columns}
         state_sum_row["fiscal_year"] = "<b>TOTAL SUMMARY</b>"
-        state_sum_row["s2_adjustment"] = f"<b>{tot_state_s2}</b>"
-        state_sum_row["lfs_delta"] = f"<b>{tot_state_lfs}</b>"
+        state_sum_row["s2_adjustment"] = f"<b>${tot_state_s2:,.2f}</b>" if tot_state_s2 >= 0 else f"<b>$-{abs(tot_state_s2):,.2f}</b>"
+        state_sum_row["lfs_delta"] = f"<b>${tot_state_lfs:,.2f}</b>" if tot_state_lfs >= 0 else f"<b>$-{abs(tot_state_lfs):,.2f}</b>"
         
         df_state_final = pd.concat([df_state_render, pd.DataFrame([state_sum_row])], ignore_index=True)
         df_state_final.rename(columns=rename_map, inplace=True)
