@@ -26,7 +26,7 @@ except Exception:
 SUPABASE_PROJECT_ID = "exqwkzidanuywriatmhi"
 SUPABASE_URL_SUMMARY = f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1/state_aid_summary"
 SUPABASE_URL_MAPPING = f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1/legislative_mapping"
-SUPABASE_URL_DIST_TYPE = f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1/district_metadata_mapping"
+SUPABASE_URL_DIST_TYPE = f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1/vw_district_cohorts"
 SUPABASE_URL_REVENUE = f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1/revenue"
 
 NJ_COUNTY_PREFIXES = {
