@@ -153,13 +153,21 @@ df_joined_master = pd.merge(df_summary_base, df_lookup_slice, on="join_key", how
 # Define our required columns
 required_cols = ["district_name", "district_type", "type_letter"]
 
-# Safety fill: Create column with a default if it's missing, then fill NaNs
-for col in required_cols:
-    if col not in df_joined_master.columns:
-        df_joined_master[col] = "N/A"
-    else:
-        df_joined_master[col] = df_joined_master[col].fillna("N/A")
+# -----------------------------------------------------------------------------
+# 3. RELATIONAL JOIN EXECUTION (ROBUST)
+# -----------------------------------------------------------------------------
+# ... (your existing join code) ...
 
+# SAFELY generate dropdown choices
+if 'assigned_ld' in df_joined_master.columns:
+    master_ld_options = sorted(list(set(df_joined_master[df_joined_master["assigned_ld"] != "Unassigned LD"]["assigned_ld"].dropna())))
+else:
+    master_ld_options = []
+
+if 'district_type' in df_joined_master.columns:
+    master_type_options = sorted(list(set(df_joined_master["district_type"].dropna())))
+else:
+    master_type_options = []
 # Re-link legislative maps
 leg_dict = dict(zip(df_mapping_base["join_key"], df_mapping_base["legislative_district"].astype(str).str.strip())) if not df_mapping_base.empty else {}
 df_joined_master["assigned_ld"] = df_joined_master["join_key"].map(lambda x: f"District {leg_dict.get(x)}" if leg_dict.get(x) else "Unassigned LD")# -----------------------------------------------------------------------------
