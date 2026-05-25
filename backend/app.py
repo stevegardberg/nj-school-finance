@@ -147,7 +147,7 @@ else:
 # Drop conflicting columns from the summary base to prioritize our clean lookup table rows
 cols_to_purge = ["assigned_type", "assigned_type_label", "assigned_type_letter", "district_type", "type_letter", "district_name", "assigned_ld"]
 for col in cols_to_purge:
-    if col in df_summary_base.columns:
+    if 'CDS_Code' in df_maps.columns:
         df_summary_base.drop(columns=[col], inplace=True)
 
 # Merge tables on our clean relational text keys
@@ -178,7 +178,10 @@ df_joined_master["assigned_county"] = df_joined_master["county_code"].map(lambda
 # Generate static dropdown choices directly from verified table outputs
 master_ld_options = sorted(list(set(df_joined_master[df_joined_master["assigned_ld"] != "Unassigned LD"]["assigned_ld"].dropna())))
 master_type_options = sorted(list(set(df_joined_master["district_type"].dropna())))
-
+# Add this after Section 3 to ensure your join didn't lose data
+with st.sidebar:
+    st.write(f"Master Row Count: {len(df_joined_master)}")
+    st.write(f"Missing Types: {df_joined_master['district_type'].isna().sum()}")
 # -----------------------------------------------------------------------------
 # 4. ADVANCED HIERARCHICAL CASCADING HEADER FILTERS
 # -----------------------------------------------------------------------------
