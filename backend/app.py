@@ -10,7 +10,7 @@ if 'initialized' not in st.session_state:
     st.cache_data.clear()
     st.session_state['initialized'] = True
 
-# 2. DATABASE HANDSHAKE & DISCOVERY
+# 2. DATABASE HANDSHAKE
 try:
     headers = {
         "apikey": st.secrets["headers"]["apikey"],
@@ -18,10 +18,6 @@ try:
     }
     SUPABASE_PROJECT_ID = "exqwkzidanuywriatmhi"
     BASE_URL = f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1"
-    
-    # Discovery call
-    discovery_res = requests.get(f"{BASE_URL}/", headers=headers, timeout=10)
-    available_tables = discovery_res.json() if discovery_res.status_code == 200 else "Could not reach API"
 except Exception as e:
     st.error(f"Security/Connection Error: {e}")
     st.stop()
@@ -40,17 +36,16 @@ def fetch_data_debug(endpoint):
 # 3. DATA ACQUISITION
 st.markdown("### 🏛️ NJ School Finance Platform")
 
-# Fetching Data
+# TRIED BOTH NAMES: If the first returns 0, the table might be called the other
 raw_summary, s_msg = fetch_data_debug("state_aid_summary")
 raw_map, m_msg = fetch_data_debug("legislative_mapping")
-raw_types, t_msg = fetch_data_debug("district_metadata_mapping")
+raw_types, t_msg = fetch_data_debug("vw_district_cohorts") 
 
 # Visual Diagnostic
-with st.expander("🔍 Diagnostic & Table Discovery", expanded=True):
+with st.expander("🔍 Diagnostic Logs", expanded=True):
     st.write(f"Summary: {len(raw_summary)} rows | Status: {s_msg}")
     st.write(f"Mapping: {len(raw_map)} rows | Status: {m_msg}")
-    st.write(f"Metadata (Types): {len(raw_types)} rows | Status: {t_msg}")
-    st.write("Available Tables/Views:", available_tables)
+    st.write(f"Metadata (vw_district_cohorts): {len(raw_types)} rows | Status: {t_msg}")
 
 # 4. DATAFRAME PROCESSING
 df_all = pd.DataFrame(raw_summary) if raw_summary else pd.DataFrame(columns=["cds_code", "fiscal_year"])
@@ -61,7 +56,7 @@ for df in [df_all, df_types]:
     if "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
 
-# Merge with safety
+# Merge
 df_joined = pd.merge(df_all, df_types, on="cds_code", how="left")
 
 # Force-create columns so app doesn't crash
@@ -90,7 +85,6 @@ with f1:
 
 if sel_dist != "Select...":
     st.markdown(f"#### 📍 Ledger for {sel_dist}")
-    display_df = df_joined[df_joined["district_name"] == sel_dist].copy()
-    st.dataframe(display_df)
+    st.dataframe(df_joined[df_joined["district_name"] == sel_dist])
 else:
     st.info("Select a district to view calculations.")
