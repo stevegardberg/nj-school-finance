@@ -6,7 +6,7 @@ import requests
 # Set page configuration to maximum wide-mode for 12-column high spreadsheet density
 st.set_page_config(layout="wide")
 
-# Force-clear any internal Streamlit memory buffers on initialization to guarantee fresh data rows
+# Force-clear internal Streamlit memory buffers to guarantee fresh data streams
 if 'initialized' not in st.session_state:
     st.cache_data.clear()
     st.session_state['initialized'] = True
@@ -92,10 +92,10 @@ def clean_html_currency_formatter(df):
     return df_formatted.to_html(index=False, escape=False)
 
 # -----------------------------------------------------------------------------
-# 2. RUN DATA PIPELINE ACQUISITION
+# 2. RUN DATA PIPELINE ACQUISITION WITH STRICT ISOLATION
 # -----------------------------------------------------------------------------
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
-st.markdown("**NJASBO 2026 Presentation Engine (Hardened Safe-Cast Run)**")
+st.markdown("**NJASBO 2026 Presentation Engine (Relational Join Run)**")
 
 raw_summary = fetch_supabase_table_data(SUPABASE_URL_SUMMARY)
 raw_mapping = fetch_supabase_table_data(SUPABASE_URL_MAPPING)
@@ -106,74 +106,65 @@ df_summary_base = pd.DataFrame(raw_summary) if raw_summary else pd.DataFrame(col
 df_mapping_base = pd.DataFrame(raw_mapping) if raw_mapping else pd.DataFrame(columns=["cds_code", "legislative_district"])
 df_types_base = pd.DataFrame(raw_types) if raw_types else pd.DataFrame(columns=["cds_code", "district_name", "district_type"])
 
-if df_summary_base.empty:
-    st.error("⏳ Critical Error: The master financial data storage pool cannot be read.")
+if df_summary_base.empty or df_types_base.empty:
+    st.error("⏳ Critical Error: Could not establish connection to relational database tables.")
     st.stop()
 
-# Force join keys into numeric integers to bypass string formatting bugs
-def secure_integer_cast(series):
-    clean_series = series.astype(str).str.split('.').str[0].str.strip()
-    return pd.to_numeric(clean_series, errors='coerce').fillna(0).astype(int)
+# Force strict alphanumeric normalization across join arrays to bypass text formatting discrepancies
+def secure_string_normalize(series):
+    return series.astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
 
-df_summary_base["join_key_int"] = secure_integer_cast(df_summary_base["cds_code"])
-df_types_base["join_key_int"] = secure_integer_cast(df_types_base["cds_code"])
-if not df_mapping_base.empty: df_mapping_base["join_key_int"] = secure_integer_cast(df_mapping_base["cds_code"])
+df_summary_base["join_key"] = secure_string_normalize(df_summary_base["cds_code"])
+df_types_base["join_key"] = secure_string_normalize(df_types_base["cds_code"])
+if not df_mapping_base.empty: df_mapping_base["join_key"] = secure_string_normalize(df_mapping_base["cds_code"])
 
-# Extract county codes based on the original string positioning
-df_summary_base["county_code_string"] = df_summary_base["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:2]
+# Extract county prefixes securely
+df_summary_base["county_code"] = df_summary_base["join_key"].str[:2]
 
-# HARDENED COLUMN CHECK: Auto-detect if Supabase named the column something else (like 'group' or 'Group')
-detected_type_col = "district_type"
-for alternative in ["district_type", "group", "Group", "district_cohort", "type"]:
-    if alternative in df_types_base.columns:
-        detected_type_col = alternative
-        break
-
-# Normalize the column name to 'district_type' inside Python
-df_types_base["district_type"] = df_types_base[detected_type_col].astype(str).str.strip()
+# Clean the separate lookup dataframe variables
+df_types_base["district_type"] = df_types_base["district_type"].astype(str).str.strip()
 df_types_base["district_name"] = df_types_base["district_name"].astype(str).str.strip()
 df_types_base["type_letter"] = df_types_base["district_type"].map(lambda x: x.split('.')[0].strip().upper() if '.' in x else x[:1].upper())
 
 # Extract wealth modifiers safely from user budgets
 df_all_rev = pd.DataFrame(raw_revenue) if raw_revenue else pd.DataFrame(columns=["cds_code", "fiscal_year", "line_no", "amount"])
 if not df_all_rev.empty:
-    df_all_rev["cds_code"] = df_all_rev["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
+    df_all_rev["join_key"] = secure_string_normalize(df_all_rev["cds_code"])
     df_all_rev["fiscal_year"] = df_all_rev["fiscal_year"].astype(str).str.strip().str.upper()
     df_all_rev["amount"] = pd.to_numeric(df_all_rev["amount"]).fillna(0.0)
     
     df_val = df_all_rev[df_all_rev["line_no"].isin([40, "40"])].copy()
     df_inc = df_all_rev[df_all_rev["line_no"].isin([20, "20"])].copy()
     
-    val_lookup = dict(zip(df_val["cds_code"].str.cat(df_val["fiscal_year"], sep="_"), df_val["amount"]))
-    inc_lookup = dict(zip(df_inc["cds_code"].str.cat(df_inc["fiscal_year"], sep="_"), df_inc["amount"]))
+    val_lookup = dict(zip(df_val["join_key"].str.cat(df_val["fiscal_year"], sep="_"), df_val["amount"]))
+    inc_lookup = dict(zip(df_inc["join_key"].str.cat(df_inc["fiscal_year"], sep="_"), df_inc["amount"]))
 else:
     val_lookup, inc_lookup = {}, {}
 
 # -----------------------------------------------------------------------------
-# 3. COMBINE DATASETS USING ABSOLUTE ISOLATION INNER JOIN MATCHES
+# 3. RELATIONAL JOIN EXECUTION
 # -----------------------------------------------------------------------------
+# Drop conflicting columns from the summary base to prioritize our clean lookup table rows
 cols_to_purge = ["assigned_type", "assigned_type_label", "assigned_type_letter", "district_type", "type_letter", "district_name", "assigned_ld"]
 for col in cols_to_purge:
     if col in df_summary_base.columns:
         df_summary_base.drop(columns=[col], inplace=True)
 
-# Merge frameworks matching strictly on integer codes
-if not df_types_base.empty:
-    df_types_clean_merge = df_types_base[["join_key_int", "district_name", "district_type", "type_letter"]].copy()
-    df_joined_master = pd.merge(df_summary_base, df_types_clean_merge, on="join_key_int", how="inner")
-else:
-    df_joined_master = df_summary_base.copy()
-    df_joined_master["district_name"] = "Unknown District"
-    df_joined_master["district_type"] = "B. K-8 / 0 - 400"
-    df_joined_master["type_letter"] = "B"
+# Merge tables on our clean relational text keys
+df_lookup_slice = df_types_base[["join_key", "district_name", "district_type", "type_letter"]].copy()
+df_joined_master = pd.merge(df_summary_base, df_lookup_slice, on="join_key", how="left")
+
+# Assign fallbacks only for dangling rows outside the official state registry limits
+df_joined_master["district_type"] = df_joined_master["district_type"].fillna("B. K-8 / 0 - 400")
+df_joined_master["type_letter"] = df_joined_master["type_letter"].fillna("B")
+df_joined_master["district_name"] = df_joined_master["district_name"].fillna("Unknown District")
 
 # Re-link legislative maps
-leg_dict = dict(zip(df_mapping_base["join_key_int"], df_mapping_base["legislative_district"].astype(str).str.strip())) if not df_mapping_base.empty else {}
-df_joined_master["assigned_ld"] = df_joined_master["join_key_int"].map(lambda x: f"District {leg_dict.get(x)}" if leg_dict.get(x) else "Unassigned LD")
+leg_dict = dict(zip(df_mapping_base["join_key"], df_mapping_base["legislative_district"].astype(str).str.strip())) if not df_mapping_base.empty else {}
+df_joined_master["assigned_ld"] = df_joined_master["join_key"].map(lambda x: f"District {leg_dict.get(x)}" if leg_dict.get(x) else "Unassigned LD")
 
 df_joined_master["fiscal_year"] = df_joined_master["fiscal_year"].astype(str).str.strip().str.upper()
-df_joined_master["clean_cds_string"] = df_joined_master["join_key_int"].astype(str).str.zfill(6)
-df_joined_master["lookup_key"] = df_joined_master["clean_cds_string"].str.cat(df_joined_master["fiscal_year"], sep="_")
+df_joined_master["lookup_key"] = df_joined_master["join_key"].str.cat(df_joined_master["fiscal_year"], sep="_")
 df_joined_master["equalized_valuation"] = df_joined_master["lookup_key"].map(lambda x: val_lookup.get(x, 0.0))
 df_joined_master["district_income"] = df_joined_master["lookup_key"].map(lambda x: inc_lookup.get(x, 0.0))
 
@@ -182,9 +173,9 @@ for target in ["adequacy_budget", "uncapped_aid", "actual_net_payout", "s2_adjus
     df_joined_master[target] = pd.to_numeric(df_joined_master.get(target, 0.0)).fillna(0.0)
 
 df_joined_master["lfs_delta"] = df_joined_master["actual_tax_levy"] - df_joined_master["local_fair_share"]
-df_joined_master["assigned_county"] = df_joined_master["county_code_string"].map(lambda x: NJ_COUNTY_PREFIXES.get(x, "Unassigned"))
+df_joined_master["assigned_county"] = df_joined_master["county_code"].map(lambda x: NJ_COUNTY_PREFIXES.get(x, "Unassigned"))
 
-# Create options array directly from the successfully joined columns
+# Generate static dropdown choices directly from verified table outputs
 master_ld_options = sorted(list(set(df_joined_master[df_joined_master["assigned_ld"] != "Unassigned LD"]["assigned_ld"].dropna())))
 master_type_options = sorted(list(set(df_joined_master["district_type"].dropna())))
 
@@ -205,7 +196,7 @@ with st.container():
     with f_col2:
         sel_type_label = st.selectbox("2️⃣ District Type Filter:", ["All District Types"] + master_type_options, index=0)
 
-    # Filter active data frame copies based on dropdown selections
+    # Filter our active data frame based on user selection
     df_cascade = df_joined_master.copy()
     
     if sel_ld != "All Legislative Districts":
@@ -225,7 +216,7 @@ with st.container():
 
     with f_col4:
         available_towns = sorted(list(set(df_cascade["district_name"].dropna())))
-        if "Unknown District Name" in available_towns: available_towns.remove("Unknown District Name")
+        if "Unknown District" in available_towns: available_towns.remove("Unknown District")
         sel_district = st.selectbox("4️⃣ Target Local District:", ["Select a District..."] + available_towns, index=0)
 
     st.markdown("---")
