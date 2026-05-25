@@ -197,11 +197,15 @@ with st.container():
         target_letter = sel_type_label.split('.')[0].strip().upper() if '.' in sel_type_label else sel_type_label[:1].upper()
         df_cascade = df_cascade[df_cascade["type_letter"] == target_letter]
 
-    with f_col3:
-        available_counties = sorted(list(set(df_cascade["assigned_county"].dropna())))
-        if "Unassigned" in available_counties: available_counties.remove("Unassigned")
-        sel_county = st.selectbox("3️⃣ Local County:", ["All Counties"] + available_counties, index=0)
-
+with f_col3:
+        # SAFETY CHECK: Ensure assigned_county exists before trying to use it
+        if "assigned_county" in df_cascade.columns:
+            available_counties = sorted(list(set(df_cascade["assigned_county"].dropna())))
+            if "Unassigned" in available_counties: available_counties.remove("Unassigned")
+            sel_county = st.selectbox("3️⃣ Local County:", ["All Counties"] + available_counties, index=0)
+        else:
+            st.warning("County data unavailable.")
+            sel_county = "All Counties"
     if sel_county != "All Counties":
         df_cascade = df_cascade[df_cascade["assigned_county"] == sel_county]
 
