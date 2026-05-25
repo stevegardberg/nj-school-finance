@@ -147,7 +147,7 @@ else:
 # Drop conflicting columns from the summary base to prioritize our clean lookup table rows
 cols_to_purge = ["assigned_type", "assigned_type_label", "assigned_type_letter", "district_type", "type_letter", "district_name", "assigned_ld"]
 for col in cols_to_purge:
-    if 'CDS_Code' in df_maps.columns:
+    if 'CDS_Code' in df_mapping_base.columns:
         df_summary_base.drop(columns=[col], inplace=True)
 
 # Merge tables on our clean relational text keys
