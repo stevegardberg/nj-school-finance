@@ -37,16 +37,14 @@ def fetch_supabase_table_data(base_url):
     return all_records
 
 def clean_html_currency_formatter(df):
-    """Calculates, orders, and formats financial columns."""
+    """Calculates, orders, and formats financial columns (No decimals)."""
     df_temp = df.copy()
     
-    # Perform calculation
     if "actual_tax_levy" in df_temp.columns and "local_fair_share" in df_temp.columns:
         df_temp["levy_delta"] = df_temp["actual_tax_levy"].fillna(0) - df_temp["local_fair_share"].fillna(0)
     else:
         df_temp["levy_delta"] = 0
     
-    # Define order including new calculated column
     ordered_cols = [
         "fiscal_year", "adequacy_budget", "uncapped_aid", "actual_state_aid", 
         "s2_adjustment", "local_fair_share", "actual_tax_levy", "levy_delta", 
@@ -71,7 +69,8 @@ def clean_html_currency_formatter(df):
     
     for col in df_formatted.columns:
         if col != "Fiscal Year":
-            df_formatted[col] = df_formatted[col].apply(lambda x: f"${float(x):,.2f}" if pd.notnull(x) and str(x).replace('.','',1).replace('-','',1).isdigit() else "$0.00")
+            # Using :,.0f to drop decimals/cents
+            df_formatted[col] = df_formatted[col].apply(lambda x: f"${float(x):,.0f}" if pd.notnull(x) else "$0")
             
     return df_formatted.to_html(index=False, escape=False)
 
@@ -89,7 +88,6 @@ df_all_types = pd.DataFrame(raw_types) if raw_types else pd.DataFrame()
 
 df_all_summary["cds_code"] = df_all_summary["cds_code"].astype(str).str.zfill(6).str[:6]
 
-# Ensure numerics
 numeric_cols = ["adequacy_budget", "uncapped_aid", "actual_state_aid", "s2_adjustment", "local_fair_share", "actual_tax_levy", "equalized_valuation", "district_income"]
 for col in numeric_cols:
     if col in df_all_summary.columns:
