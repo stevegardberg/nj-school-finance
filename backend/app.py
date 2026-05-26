@@ -72,19 +72,24 @@ master_type_options = sorted([t for t in df_all_summary["assigned_type"].unique(
 # 3. FILTERS & TABS
 # -----------------------------------------------------------------------------
 with st.container():
-    # RESET BUTTON
-    if st.button("🔄 Reset All Filters"): st.rerun()
+    # RESET BUTTON: Clear session state to force widget defaults
+    if st.button("🔄 Reset All Filters"):
+        for key in st.session_state.keys():
+            del st.session_state[key]
+        st.rerun()
     
     c1, c2, c3, c4 = st.columns(4)
-    with c1: sel_ld = st.selectbox("1️⃣ Legislative Filter:", ["All Legislative Districts"] + master_ld_options)
-    with c2: sel_type = st.selectbox("2️⃣ District Type Filter:", ["All District Types"] + master_type_options)
+    with c1: sel_ld = st.selectbox("1️⃣ Legislative Filter:", ["All Legislative Districts"] + master_ld_options, key="ld")
+    with c2: sel_type = st.selectbox("2️⃣ District Type Filter:", ["All District Types"] + master_type_options, key="type")
     
     df_cascade = df_all_summary.copy()
     if sel_ld != "All Legislative Districts": df_cascade = df_cascade[df_cascade["assigned_ld"] == sel_ld]
     if sel_type != "All District Types": df_cascade = df_cascade[df_cascade["assigned_type"] == sel_type]
     
-    with c3: sel_county = st.selectbox("3️⃣ Local County:", ["All Counties"] + sorted(df_cascade["assigned_county"].dropna().unique().tolist()))
-    with c4: sel_district = st.selectbox("4️⃣ Target Local District:", ["Select a District..."] + sorted(df_cascade["district_name"].dropna().unique().tolist()))
+    with c3: sel_county = st.selectbox("3️⃣ Local County:", ["All Counties"] + sorted(df_cascade["assigned_county"].dropna().unique().tolist()), key="county")
+    if sel_county != "All Counties": df_cascade = df_cascade[df_cascade["assigned_county"] == sel_county]
+    
+    with c4: sel_district = st.selectbox("4️⃣ Target Local District:", ["Select a District..."] + sorted(df_cascade["district_name"].dropna().unique().tolist()), key="district")
 
 tab1, tab2, tab3 = st.tabs(["⚖️ DATABASE VALIDATION MATRIX", "📊 User Friendly Budget Approp Explorer", "🎯 Academic Return Matrix"])
 
