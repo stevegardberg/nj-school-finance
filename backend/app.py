@@ -37,33 +37,33 @@ def fetch_supabase_table_data(base_url):
     return all_records
 
 def clean_html_currency_formatter(df):
-    """Formats and orders financial columns per the specified sequence."""
+    """Formats and orders financial columns per the exact specified sequence."""
     
-    # Define the precise order requested
+    # 1. Define the precise order requested
     ordered_cols = [
-        "fiscal_year", "adequacy_budget", "actual_state_aid", 
-        "uncapped_aid", "local_fair_share", "actual_tax_levy", 
-        "s2_adjustment", "equalized_valuation", "district_income"
+        "fiscal_year", "adequacy_budget", "uncapped_aid", "actual_state_aid", 
+        "s2_adjustment", "local_fair_share", "actual_tax_levy", 
+        "equalized_valuation", "district_income"
     ]
     
-    # Map to professional display headers
+    # 2. Map to professional display headers
     rename_map = {
         "fiscal_year": "Fiscal Year",
         "adequacy_budget": "Adequacy Budget",
+        "uncapped_aid": "Uncapped Target",
         "actual_state_aid": "Actual State Aid",
-        "uncapped_aid": "Uncapped SFRA Formula Target",
-        "local_fair_share": "Local Fair Share (LFS)",
-        "actual_tax_levy": "Actual Local Tax Levy",
-        "s2_adjustment": "Legislative S2 Adjustment Delta",
-        "equalized_valuation": "Equalized Property Valuation",
-        "district_income": "Aggregate District Income"
+        "s2_adjustment": "S2 Adjustment",
+        "local_fair_share": "Local Fair Share",
+        "actual_tax_levy": "Actual Tax Levy",
+        "equalized_valuation": "Equalized Valuation",
+        "district_income": "District Income"
     }
 
-    # Filter and reorder
+    # 3. Filter and reorder
     df_formatted = df[[c for c in ordered_cols if c in df.columns]].copy()
     df_formatted.rename(columns=rename_map, inplace=True)
     
-    # Format financial columns
+    # 4. Format financial columns
     for col in df_formatted.columns:
         if col != "Fiscal Year":
             df_formatted[col] = df_formatted[col].apply(lambda x: f"${float(x):,.2f}" if pd.notnull(x) and str(x).replace('.','',1).replace('-','',1).isdigit() else "$0.00")
