@@ -117,7 +117,9 @@ else:
 
 # Populate type options from whatever data we successfully joined
 master_type_options = sorted(list(set(df_all_summary["assigned_type"].dropna().unique())))
-
+# --- INSERT THE NEW LINES HERE ---
+df_all_summary["assigned_ld"] = df_all_summary["cds_code"].map(lambda x: f"District {leg_dict.get(x)}" if leg_dict.get(x) else "Unassigned LD")
+df_all_summary["assigned_county"] = df_all_summary["cds_code"].map(lambda x: NJ_COUNTY_PREFIXES.get(x[:2], "Unassigned"))
 # -----------------------------------------------------------------------------
 # 3. ADVANCED HIERARCHICAL CASCADING HEADER FILTERS
 # -----------------------------------------------------------------------------
