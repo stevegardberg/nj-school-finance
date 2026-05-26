@@ -37,19 +37,38 @@ def fetch_supabase_table_data(base_url):
     return all_records
 
 def clean_html_currency_formatter(df):
-    """Formats only financial columns; filters out backend metadata columns."""
-    display_cols = [
-        "fiscal_year", "actual_state_aid", "adequacy_budget", 
-        "uncapped_aid", "equalized_valuation", "district_income", 
-        "local_fair_share", "actual_tax_levy", "s2_adjustment"
-    ]
-    # Filter the dataframe to just the display columns before rendering
-    df_display = df[[c for c in display_cols if c in df.columns]].copy()
+    """Formats and orders financial columns per the specified sequence."""
     
-    for col in df_display.columns:
-        if col != "fiscal_year":
-            df_display[col] = df_display[col].apply(lambda x: f"${float(x):,.2f}" if pd.notnull(x) and str(x).replace('.','',1).replace('-','',1).isdigit() else "$0.00")
-    return df_display.to_html(index=False, escape=False)
+    # Define the precise order requested
+    ordered_cols = [
+        "fiscal_year", "adequacy_budget", "actual_state_aid", 
+        "uncapped_aid", "local_fair_share", "actual_tax_levy", 
+        "s2_adjustment", "equalized_valuation", "district_income"
+    ]
+    
+    # Map to professional display headers
+    rename_map = {
+        "fiscal_year": "Fiscal Year",
+        "adequacy_budget": "Adequacy Budget",
+        "actual_state_aid": "Actual State Aid",
+        "uncapped_aid": "Uncapped SFRA Formula Target",
+        "local_fair_share": "Local Fair Share (LFS)",
+        "actual_tax_levy": "Actual Local Tax Levy",
+        "s2_adjustment": "Legislative S2 Adjustment Delta",
+        "equalized_valuation": "Equalized Property Valuation",
+        "district_income": "Aggregate District Income"
+    }
+
+    # Filter and reorder
+    df_formatted = df[[c for c in ordered_cols if c in df.columns]].copy()
+    df_formatted.rename(columns=rename_map, inplace=True)
+    
+    # Format financial columns
+    for col in df_formatted.columns:
+        if col != "Fiscal Year":
+            df_formatted[col] = df_formatted[col].apply(lambda x: f"${float(x):,.2f}" if pd.notnull(x) and str(x).replace('.','',1).replace('-','',1).isdigit() else "$0.00")
+            
+    return df_formatted.to_html(index=False, escape=False)
 
 # -----------------------------------------------------------------------------
 # 2. DATA PIPELINE
@@ -65,7 +84,7 @@ df_all_types = pd.DataFrame(raw_types) if raw_types else pd.DataFrame()
 
 df_all_summary["cds_code"] = df_all_summary["cds_code"].astype(str).str.zfill(6).str[:6]
 
-# Map Dictionaries
+# Mapping
 leg_dict = dict(zip(df_all_mapping["cds_code"].str.zfill(6), df_all_mapping["legislative_district"])) if not df_all_mapping.empty else {}
 type_dict = dict(zip(df_all_types["cds_code"].str.zfill(6), df_all_types["district_type"])) if not df_all_types.empty else {}
 
