@@ -37,10 +37,20 @@ def fetch_supabase_table_data(base_url):
     return all_records
 
 def clean_html_currency_formatter(df):
+    """Formats only columns containing numeric financial data."""
     df_formatted = df.copy()
+    # Identify financial columns to format
+    financial_cols = [
+        "actual_state_aid", "adequacy_budget", "uncapped_aid", 
+        "equalized_valuation", "district_income", "local_fair_share", 
+        "actual_tax_levy", "s2_adjustment", "actual_net_payout", "actual_minus_uncapped"
+    ]
+    
     for col in df_formatted.columns:
-        if col != "Fiscal Year":
-            df_formatted[col] = df_formatted[col].apply(lambda x: f"${float(x):,.2f}" if pd.notnull(x) else "$0.00")
+        if col in financial_cols:
+            df_formatted[col] = df_formatted[col].apply(
+                lambda x: f"${float(x):,.2f}" if pd.notnull(x) and str(x).replace('.','',1).replace('-','',1).isdigit() else "$0.00"
+            )
     return df_formatted.to_html(index=False, escape=False)
 
 # -----------------------------------------------------------------------------
@@ -88,7 +98,7 @@ tab1, tab2, tab3 = st.tabs(["⚖️ DATABASE VALIDATION MATRIX", "📊 User Frie
 with tab1:
     if sel_district != "Select a District...":
         st.markdown(f"#### 📍 Target District Ledger — {sel_district}")
-        df_render = df_all_summary[df_all_summary["district_name"] == sel_district]
+        df_render = df_all_summary[df_all_summary["district_name"] == sel_district].sort_values("fiscal_year")
         st.write(clean_html_currency_formatter(df_render), unsafe_allow_html=True)
     else:
         st.info("Select a district to view matrix.")
