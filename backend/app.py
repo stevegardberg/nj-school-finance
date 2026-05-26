@@ -37,33 +37,38 @@ def fetch_supabase_table_data(base_url):
     return all_records
 
 def clean_html_currency_formatter(df):
-    """Formats and orders financial columns per the exact specified sequence."""
+    """Calculates, orders, and formats financial columns."""
+    df_temp = df.copy()
     
-    # 1. Define the precise order requested
+    # Perform calculation
+    if "actual_tax_levy" in df_temp.columns and "local_fair_share" in df_temp.columns:
+        df_temp["levy_delta"] = df_temp["actual_tax_levy"].fillna(0) - df_temp["local_fair_share"].fillna(0)
+    else:
+        df_temp["levy_delta"] = 0
+    
+    # Define order including new calculated column
     ordered_cols = [
         "fiscal_year", "adequacy_budget", "uncapped_aid", "actual_state_aid", 
-        "s2_adjustment", "local_fair_share", "actual_tax_levy", 
+        "s2_adjustment", "local_fair_share", "actual_tax_levy", "levy_delta", 
         "equalized_valuation", "district_income"
     ]
     
-    # 2. Map to professional display headers
     rename_map = {
         "fiscal_year": "Fiscal Year",
         "adequacy_budget": "Adequacy Budget",
-        "uncapped_aid": "Uncapped Target",
+        "uncapped_aid": "Uncapped Aid",
         "actual_state_aid": "Actual State Aid",
-        "s2_adjustment": "S2 Adjustment",
+        "s2_adjustment": "Uncapped minus Actual Aid",
         "local_fair_share": "Local Fair Share",
         "actual_tax_levy": "Actual Tax Levy",
+        "levy_delta": "Levy Over/Under LFS",
         "equalized_valuation": "Equalized Valuation",
         "district_income": "District Income"
     }
 
-    # 3. Filter and reorder
-    df_formatted = df[[c for c in ordered_cols if c in df.columns]].copy()
+    df_formatted = df_temp[[c for c in ordered_cols if c in df_temp.columns]].copy()
     df_formatted.rename(columns=rename_map, inplace=True)
     
-    # 4. Format financial columns
     for col in df_formatted.columns:
         if col != "Fiscal Year":
             df_formatted[col] = df_formatted[col].apply(lambda x: f"${float(x):,.2f}" if pd.notnull(x) and str(x).replace('.','',1).replace('-','',1).isdigit() else "$0.00")
@@ -84,7 +89,12 @@ df_all_types = pd.DataFrame(raw_types) if raw_types else pd.DataFrame()
 
 df_all_summary["cds_code"] = df_all_summary["cds_code"].astype(str).str.zfill(6).str[:6]
 
-# Mapping
+# Ensure numerics
+numeric_cols = ["adequacy_budget", "uncapped_aid", "actual_state_aid", "s2_adjustment", "local_fair_share", "actual_tax_levy", "equalized_valuation", "district_income"]
+for col in numeric_cols:
+    if col in df_all_summary.columns:
+        df_all_summary[col] = pd.to_numeric(df_all_summary[col], errors='coerce').fillna(0)
+
 leg_dict = dict(zip(df_all_mapping["cds_code"].str.zfill(6), df_all_mapping["legislative_district"])) if not df_all_mapping.empty else {}
 type_dict = dict(zip(df_all_types["cds_code"].str.zfill(6), df_all_types["district_type"])) if not df_all_types.empty else {}
 
