@@ -121,8 +121,17 @@ master_type_options = sorted(list(set(df_all_summary["assigned_type"].dropna().u
 # -----------------------------------------------------------------------------
 # 3. ADVANCED HIERARCHICAL CASCADING HEADER FILTERS
 # -----------------------------------------------------------------------------
+# --- ADD THIS TO DEFINE THE MISSING VARIABLE ---
+# Define master_ld_options based on existing summary data
+if "assigned_ld" in df_all_summary.columns:
+    master_ld_options = sorted(list(set(df_all_summary[df_all_summary["assigned_ld"] != "Unassigned LD"]["assigned_ld"].dropna())))
+else:
+    master_ld_options = []
+# -----------------------------------------------
+
+# 3. ADVANCED HIERARCHICAL CASCADING HEADER FILTERS
 with st.container():
-   # Reset button layout anchor
+   # ... (your existing filter code)   # Reset button layout anchor
    r_col1, r_col2 = st.columns([6, 1])
    with r_col2:
        if st.button("🔄 Reset All Filters", use_container_width=True):
