@@ -253,15 +253,14 @@ with tab1:
    st.markdown("<br><hr>", unsafe_allow_html=True)
 
 
-   # --- TIER 2: COHORT PEER GROUP AVERAGE MATRICES ---
-   st.markdown("#### 👥 Peer Group Benchmark Aggregator & Comparative Performance Matrix")
+ # --- TIER 2: DISTRICT TYPE PEER GROUP AVERAGE MATRICES ---
+   st.markdown("#### 👥 District Type Benchmark Aggregator & Comparative Performance Matrix")
   
    # Establish distinct fallback logic parameters
    target_peer_ld = sel_ld if sel_ld != "All Legislative Districts" else (current_active_ld if current_active_ld else "All Legislative Districts")
    target_peer_type = sel_type if sel_type != "All District Types" else (current_active_type if current_active_type else "All District Types")
   
-   st.caption(f"Displays mathematically computed multi-year group averages matching: **{target_peer_ld}** | **{target_peer_type}**")
-  
+   st.caption(f"Displays mathematically computed multi-year group averages matching: **{target_peer_ld}** | **{target_peer_type}**") 
    df_peer_pool = df_all_summary.copy()
    if target_peer_ld != "All Legislative Districts":
        df_peer_pool = df_peer_pool[df_peer_pool["assigned_ld"] == target_peer_ld]
