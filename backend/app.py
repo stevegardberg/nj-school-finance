@@ -84,72 +84,39 @@ def clean_html_currency_formatter(df):
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
 st.markdown("**NJASBO 2026 Presentation Engine (Hierarchical Cascade Configuration)**")
 
-
 raw_summary = fetch_supabase_table_data(SUPABASE_URL_SUMMARY)
 raw_mapping = fetch_supabase_table_data(SUPABASE_URL_MAPPING)
+# We keep raw_types but handle it gracefully if empty
 raw_types = fetch_supabase_table_data(SUPABASE_URL_DIST_TYPE)
 
-
 if not raw_summary:
-   st.error("⏳ Pipeline stalled. The master 'state_aid_summary' table is returning empty rows.")
-   st.stop()
+    st.error("⏳ Pipeline stalled. The master 'state_aid_summary' table is returning empty rows.")
+    st.stop()
 
-
-# Convert to dataframes
 df_all_summary = pd.DataFrame(raw_summary)
 df_all_mapping = pd.DataFrame(raw_mapping) if raw_mapping else pd.DataFrame(columns=["cds_code", "legislative_district"])
 df_all_types = pd.DataFrame(raw_types) if raw_types else pd.DataFrame(columns=["cds_code", "district_type", "district_name"])
 
+# --- DIAGNOSTIC PRE-FLIGHT ---
+with st.expander("🔍 Live Database Connection Diagnostic Pre-Flight Logs", expanded=False):
+    col_d1, col_d2, col_d3 = st.columns(3)
+    col_d1.metric("Financial Ledger Rows", f"{len(df_all_summary)} rows")
+    col_d2.metric("Legislative Map Rows", f"{len(df_all_mapping)} rows")
+    col_d3.metric("District Type Map Rows", f"{len(df_all_types)} rows")
 
-# --- VISUAL PRE-FLIGHT DIAGNOSTIC LOG EXPANDER ---
-with st.expander("🔍 Live Database Connection Diagnostic Pre-Flight Logs", expanded=True):
-   col_d1, col_d2, col_d3 = st.columns(3)
-   col_d1.metric("Financial Ledger Rows", f"{len(df_all_summary)} rows")
-   col_d2.metric("Legislative Map Rows", f"{len(df_all_mapping)} rows")
-   col_d3.metric("District Type Map Rows", f"{len(df_all_types)} rows")
-
-
-# CLIENT SIDE BOUNDARY SAFEGUARD: Force text strings, split decimals, pad to 6, and slice exactly at 6 characters
+# --- DATA NORMALIZATION & FALLBACK LOGIC ---
 df_all_summary["cds_code"] = df_all_summary["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
 
-
-if not df_all_mapping.empty and "cds_code" in df_all_mapping.columns:
-   df_all_mapping["cds_code"] = df_all_mapping["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
-   leg_dict = dict(zip(df_all_mapping["cds_code"], df_all_mapping["legislative_district"].astype(str).str.strip()))
+# Force merge types from summary if available, otherwise use metadata table
+if "district_type" not in df_all_summary.columns and not df_all_types.empty:
+    df_all_types["cds_code"] = df_all_types["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
+    type_dict = dict(zip(df_all_types["cds_code"], df_all_types["district_type"].astype(str).str.strip()))
+    df_all_summary["assigned_type"] = df_all_summary["cds_code"].map(lambda x: type_dict.get(x, "Unassigned Type"))
 else:
-   leg_dict = {}
+    df_all_summary["assigned_type"] = df_all_summary.get("district_type", "Unassigned Type")
 
-
-if not df_all_types.empty and "cds_code" in df_all_types.columns:
-   df_all_types["cds_code"] = df_all_types["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6).str[:6]
-   type_dict = dict(zip(df_all_types["cds_code"], df_all_types["district_type"].astype(str).str.strip()))
-else:
-   type_dict = {}
-
-
-# Fast-cast financial numbers safely
-numeric_targets = ["adequacy_budget", "uncapped_aid", "actual_net_payout", "s2_adjustment", "local_fair_share", "actual_tax_levy", "equalized_valuation", "district_income"]
-for target in numeric_targets:
-   df_all_summary[target] = pd.to_numeric(df_all_summary.get(target, 0.0)).fillna(0.0)
-
-
-df_all_summary["lfs_delta"] = df_all_summary["actual_tax_levy"] - df_all_summary["local_fair_share"]
-df_all_summary["assigned_ld"] = df_all_summary["cds_code"].map(lambda x: f"District {leg_dict.get(x)}" if leg_dict.get(x) else "Unassigned LD")
-df_all_summary["assigned_type"] = df_all_summary["cds_code"].map(lambda x: type_dict.get(x, "Unassigned Type"))
-df_all_summary["assigned_county"] = df_all_summary["cds_code"].map(lambda x: NJ_COUNTY_PREFIXES.get(x[:2], "Unassigned"))
-
-
-# Isolate valid options for the master dropdown filters
-master_ld_options = sorted(list(set(df_all_summary[df_all_summary["assigned_ld"] != "Unassigned LD"]["assigned_ld"].dropna())))
-
-
-if not df_all_types.empty and "district_type" in df_all_types.columns:
-   master_type_options = sorted(list(set(df_all_types["district_type"].astype(str).str.strip().dropna())))
-   if "Statewide General Context" in master_type_options: master_type_options.remove("Statewide General Context")
-   if "district_type" in master_type_options: master_type_options.remove("district_type")
-else:
-   master_type_options = ["E. K-12 / 0 - 1800"]
-
+# Populate type options from whatever data we successfully joined
+master_type_options = sorted(list(set(df_all_summary["assigned_type"].dropna().unique())))
 
 # -----------------------------------------------------------------------------
 # 3. ADVANCED HIERARCHICAL CASCADING HEADER FILTERS
