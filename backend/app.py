@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 
-# Set page configuration for high spreadsheet density
+# Set page configuration
 st.set_page_config(layout="wide")
 
 # -----------------------------------------------------------------------------
@@ -47,18 +47,9 @@ def fetch_supabase_table_data(base_url):
         else: break
     return all_records
 
-def clean_html_currency_formatter(df):
-    df_formatted = df.copy()
-    for col in df_formatted.columns:
-        if col != "Fiscal Year":
-            df_formatted[col] = df_formatted[col].apply(lambda x: f"${float(x):,.2f}" if pd.notnull(x) else "$0.00")
-    return df_formatted.to_html(index=False, escape=False)
-
 # -----------------------------------------------------------------------------
 # 2. DATA PIPELINE
 # -----------------------------------------------------------------------------
-st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
-
 raw_summary = fetch_supabase_table_data(URLS["Summary"])
 raw_mapping = fetch_supabase_table_data(URLS["Mapping"])
 raw_types = fetch_supabase_table_data(URLS["Types"])
@@ -67,18 +58,18 @@ df_all_summary = pd.DataFrame(raw_summary)
 df_all_mapping = pd.DataFrame(raw_mapping)
 df_all_types = pd.DataFrame(raw_types)
 
-# Normalize
+# Normalization
 df_all_summary["cds_code"] = df_all_summary["cds_code"].astype(str).str.zfill(6).str[:6]
 
-# Map Dictionaries (Strict Source)
-leg_dict = dict(zip(df_all_mapping["cds_code"].str.zfill(6), df_all_mapping["legislative_district"]))
-type_dict = dict(zip(df_all_types["cds_code"].str.zfill(6), df_all_types["district_type"]))
+# Strict Mapping with Column Existence Check
+leg_dict = dict(zip(df_all_mapping["cds_code"].astype(str).str.zfill(6), df_all_mapping["legislative_district"])) if not df_all_mapping.empty and "cds_code" in df_all_mapping.columns else {}
+type_dict = dict(zip(df_all_types["cds_code"].astype(str).str.zfill(6), df_all_types["district_type"])) if not df_all_types.empty and "cds_code" in df_all_types.columns else {}
 
 df_all_summary["assigned_ld"] = df_all_summary["cds_code"].map(leg_dict)
 df_all_summary["assigned_type"] = df_all_summary["cds_code"].map(type_dict)
 df_all_summary["assigned_county"] = df_all_summary["cds_code"].str[:2].map(NJ_COUNTY_PREFIXES)
 
-# Filter Options (Strict)
+# Filter Options
 master_ld_options = sorted([f"District {int(ld)}" for ld in df_all_summary["assigned_ld"].dropna().unique()])
 master_type_options = sorted(df_all_summary["assigned_type"].dropna().unique().tolist())
 
@@ -90,7 +81,6 @@ with st.container():
     with c1: sel_ld = st.selectbox("1️⃣ Legislative Filter:", ["All Legislative Districts"] + master_ld_options)
     with c2: sel_type = st.selectbox("2️⃣ District Type Filter:", ["All District Types"] + master_type_options)
     
-    # Filtering
     df_cascade = df_all_summary.copy()
     if sel_ld != "All Legislative Districts": df_cascade = df_cascade[df_cascade["assigned_ld"] == sel_ld.replace("District ", "")]
     if sel_type != "All District Types": df_cascade = df_cascade[df_cascade["assigned_type"] == sel_type]
@@ -103,4 +93,4 @@ with st.container():
 # -----------------------------------------------------------------------------
 if sel_district != "Select a District...":
     df_render = df_all_summary[df_all_summary["district_name"] == sel_district]
-    st.write(clean_html_currency_formatter(df_render), unsafe_allow_html=True)
+    st.table(df_render)
