@@ -37,14 +37,16 @@ def fetch_supabase_table_data(base_url):
     return all_records
 
 def clean_html_currency_formatter(df):
-    """Calculates, orders, and formats financial columns (No decimals)."""
+    """Calculates, orders, and formats financial columns."""
     df_temp = df.copy()
     
+    # Calculate Levy Over/Under LFS
     if "actual_tax_levy" in df_temp.columns and "local_fair_share" in df_temp.columns:
         df_temp["levy_delta"] = df_temp["actual_tax_levy"].fillna(0) - df_temp["local_fair_share"].fillna(0)
     else:
         df_temp["levy_delta"] = 0
     
+    # Define order
     ordered_cols = [
         "fiscal_year", "adequacy_budget", "uncapped_aid", "actual_state_aid", 
         "s2_adjustment", "local_fair_share", "actual_tax_levy", "levy_delta", 
@@ -69,8 +71,7 @@ def clean_html_currency_formatter(df):
     
     for col in df_formatted.columns:
         if col != "Fiscal Year":
-            # Using :,.0f to drop decimals/cents
-            df_formatted[col] = df_formatted[col].apply(lambda x: f"${float(x):,.0f}" if pd.notnull(x) else "$0")
+            df_formatted[col] = df_formatted[col].apply(lambda x: f"${float(x):,.0f}" if pd.notnull(x) and str(x).replace('.','',1).replace('-','',1).isdigit() else "$0")
             
     return df_formatted.to_html(index=False, escape=False)
 
@@ -88,20 +89,16 @@ df_all_types = pd.DataFrame(raw_types) if raw_types else pd.DataFrame()
 
 df_all_summary["cds_code"] = df_all_summary["cds_code"].astype(str).str.zfill(6).str[:6]
 
-numeric_cols = ["adequacy_budget", "uncapped_aid", "actual_state_aid", "s2_adjustment", "local_fair_share", "actual_tax_levy", "equalized_valuation", "district_income"]
-for col in numeric_cols:
-    if col in df_all_summary.columns:
-        df_all_summary[col] = pd.to_numeric(df_all_summary[col], errors='coerce').fillna(0)
+# Map dictionaries
+leg_dict = dict(zip(df_all_mapping["cds_code"].astype(str).str.zfill(6), df_all_mapping["legislative_district"])) if not df_all_mapping.empty and "cds_code" in df_all_mapping.columns else {}
+type_dict = dict(zip(df_all_types["cds_code"].astype(str).str.zfill(6), df_all_types["district_type"])) if not df_all_types.empty and "cds_code" in df_all_types.columns else {}
 
-leg_dict = dict(zip(df_all_mapping["cds_code"].str.zfill(6), df_all_mapping["legislative_district"])) if not df_all_mapping.empty else {}
-type_dict = dict(zip(df_all_types["cds_code"].str.zfill(6), df_all_types["district_type"])) if not df_all_types.empty else {}
+df_all_summary["assigned_ld"] = df_all_summary["cds_code"].map(lambda x: f"District {leg_dict.get(x)}" if leg_dict.get(x) else None)
+df_all_summary["assigned_type"] = df_all_summary["cds_code"].map(lambda x: type_dict.get(x))
+df_all_summary["assigned_county"] = df_all_summary["cds_code"].str[:2].map(lambda x: NJ_COUNTY_PREFIXES.get(x))
 
-df_all_summary["assigned_ld"] = df_all_summary["cds_code"].map(lambda x: f"District {leg_dict.get(x)}" if leg_dict.get(x) else "Unassigned")
-df_all_summary["assigned_type"] = df_all_summary["cds_code"].map(lambda x: type_dict.get(x, "Unassigned"))
-df_all_summary["assigned_county"] = df_all_summary["cds_code"].str[:2].map(lambda x: NJ_COUNTY_PREFIXES.get(x, "Unassigned"))
-
-master_ld_options = sorted([ld for ld in df_all_summary["assigned_ld"].unique() if ld != "Unassigned"], key=lambda x: int(x.split()[-1]) if x != "Unassigned" else 0)
-master_type_options = sorted([t for t in df_all_summary["assigned_type"].unique() if t != "Unassigned"])
+master_ld_options = sorted([ld for ld in df_all_summary["assigned_ld"].dropna().unique()], key=lambda x: int(x.split()[-1]))
+master_type_options = sorted([t for t in df_all_summary["assigned_type"].dropna().unique()])
 
 # -----------------------------------------------------------------------------
 # 3. FILTERS & TABS
