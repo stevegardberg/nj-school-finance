@@ -32,11 +32,9 @@ df_merged = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how=
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
 
 # 3. CALCULATIONS
-# Convert to numeric
 for col in ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy', 'equalized_valuation', 'local_fair_share', 'district_income']:
     df_merged[col] = pd.to_numeric(df_merged[col], errors='coerce').fillna(0)
 
-# Metrics
 df_merged = df_merged.sort_values(['district_name', 'fiscal_year'])
 df_merged['Over_Under_Funded'] = df_merged['actual_state_aid'] - df_merged['uncapped_aid']
 df_merged['Pct_Change_Aid'] = df_merged.groupby('district_name')['actual_state_aid'].pct_change().fillna(0)
@@ -44,7 +42,7 @@ df_merged['Over_Under_LFS'] = df_merged['actual_tax_levy'] - df_merged['local_fa
 df_merged['Pct_Change_Levy'] = df_merged.groupby('district_name')['actual_tax_levy'].pct_change().fillna(0)
 df_merged['Tax_Levy_per_100'] = (df_merged['actual_tax_levy'] / df_merged['equalized_valuation'].replace(0, 1)) * 100
 
-# 4. FORMATTING
+# 4. FORMATTING FUNCTION
 def get_formatted_matrix(df):
     col_order = [
         'fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 
@@ -61,13 +59,14 @@ def get_formatted_matrix(df):
         'Tax_Levy_per_100': 'Levy per $100', 'district_income': 'District Income'
     }
     df_out = df[col_order].rename(columns=rename_map)
+    
     for col in df_out.columns:
-        if any(keyword in col for keyword in ['Actual', 'Budget', 'Aid', 'Levy', 'Valuation', 'Income', 'Over/Under', 'Share']):
-            df_out[col] = df_out[col].apply(lambda x: f"${x:,.0f}")
-        elif '% Change' in col:
-            df_out[col] = df_out[col].apply(lambda x: f"{x:.2%}")
-        elif 'per $100' in col:
-            df_out[col] = df_out[col].apply(lambda x: f"{x:.4f}")
+        if col in ['% Change Actual Aid', '% Change Actual Levy']:
+            df_out[col] = df_out[col].apply(lambda x: f"{float(x):.2%}")
+        elif col == 'Levy per $100':
+            df_out[col] = df_out[col].apply(lambda x: f"{float(x):.4f}")
+        else:
+            df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}")
     return df_out
 
 # 5. UI
@@ -79,7 +78,6 @@ sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_dis
 sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].fillna("Unassigned").unique().tolist()))
 sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].fillna("Unassigned").unique().tolist()))
 
-# Cascading Logic
 df_f = df_merged.copy()
 if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
 if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
@@ -87,7 +85,6 @@ if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
 
 sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().tolist()))
 
-# Final Display
 if sel_district != "Select...":
     st.markdown(f"#### 📍 Ledger: {sel_district}")
     st.dataframe(get_formatted_matrix(df_f[df_f['district_name'] == sel_district]), use_container_width=True, hide_index=True)
