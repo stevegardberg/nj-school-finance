@@ -19,7 +19,7 @@ def fetch_table(table):
         page += 1
     return pd.DataFrame(all_records)
 
-# 2. DATA LOAD & MERGE
+# 2. LOAD & MERGE
 df_sum = fetch_table("state_aid_summary")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
@@ -31,42 +31,47 @@ df_types["cds_code"] = df_types["cds_code"].astype(str).str.zfill(6)
 df_merged = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
 
-# 3. CALCULATIONS & FORMATTING
-for col in ['actual_state_aid', 'adequacy_budget', 'actual_tax_levy', 'equalized_valuation']:
+# 3. CALCULATIONS
+# Convert to numeric
+for col in ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy', 'equalized_valuation', 'local_fair_share', 'district_income']:
     df_merged[col] = pd.to_numeric(df_merged[col], errors='coerce').fillna(0)
 
-df_merged['YoY_State_Aid_Diff'] = df_merged.groupby('district_name')['actual_state_aid'].diff().fillna(0)
+# Metrics
+df_merged = df_merged.sort_values(['district_name', 'fiscal_year'])
+df_merged['Over_Under_Funded'] = df_merged['actual_state_aid'] - df_merged['uncapped_aid']
+df_merged['Pct_Change_Aid'] = df_merged.groupby('district_name')['actual_state_aid'].pct_change().fillna(0)
+df_merged['Over_Under_LFS'] = df_merged['actual_tax_levy'] - df_merged['local_fair_share']
+df_merged['Pct_Change_Levy'] = df_merged.groupby('district_name')['actual_tax_levy'].pct_change().fillna(0)
 df_merged['Tax_Levy_per_100'] = (df_merged['actual_tax_levy'] / df_merged['equalized_valuation'].replace(0, 1)) * 100
 
-def format_matrix(df):
-    """Orders and formats columns for the final Ledger view."""
-    # Define Column Order
-    col_order = ['fiscal_year', 'actual_state_aid', 'YoY_State_Aid_Diff', 'adequacy_budget', 
-                 'actual_tax_levy', 'equalized_valuation', 'Tax_Levy_per_100']
-    
-    # Human-readable mapping
+# 4. FORMATTING FUNCTION
+def get_formatted_matrix(df):
+    col_order = [
+        'fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 
+        'Over_Under_Funded', 'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 
+        'Over_Under_LFS', 'Pct_Change_Levy', 'equalized_valuation', 
+        'Tax_Levy_per_100', 'district_income'
+    ]
     rename_map = {
-        'fiscal_year': 'Fiscal Year',
-        'actual_state_aid': 'Actual State Aid',
-        'YoY_State_Aid_Diff': 'YoY Aid Change',
-        'adequacy_budget': 'Adequacy Budget',
-        'actual_tax_levy': 'Actual Tax Levy',
-        'equalized_valuation': 'Equalized Valuation',
-        'Tax_Levy_per_100': 'Tax Levy per $100'
+        'fiscal_year': 'Fiscal Year', 'adequacy_budget': 'Adequacy Budget',
+        'uncapped_aid': 'Uncapped Aid', 'actual_state_aid': 'Actual Aid',
+        'Over_Under_Funded': 'Over/Under Funded', 'Pct_Change_Aid': '% Change Actual Aid',
+        'local_fair_share': 'Local Fair Share', 'actual_tax_levy': 'Actual Levy',
+        'Over_Under_LFS': 'Over/Under LFS', 'Pct_Change_Levy': '% Change Actual Levy',
+        'equalized_valuation': 'Equalized Valuation', 'Tax_Levy_per_100': 'Levy per $100',
+        'district_income': 'District Income'
     }
-    
     df_out = df[col_order].rename(columns=rename_map)
-    
-    # Format Currency
     for col in df_out.columns:
-        if col != 'Fiscal Year' and col != 'Tax Levy per $100':
+        if any(x in col for x in ['Actual', 'Budget', 'Aid', 'Levy', 'Valuation', 'Income', 'Over/Under']):
             df_out[col] = df_out[col].apply(lambda x: f"${x:,.0f}")
-        elif col == 'Tax Levy per $100':
+        elif '%' in col:
+            df_out[col] = df_out[col].apply(lambda x: f"{x:.2%}")
+        elif 'per $100' in col:
             df_out[col] = df_out[col].apply(lambda x: f"{x:.4f}")
-            
     return df_out
 
-# 4. UI FILTERS
+# 5. UI
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
 if st.button("🔄 Reset"): st.rerun()
 
@@ -82,7 +87,6 @@ if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
 
 sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().tolist()))
 
-# 5. FINAL DISPLAY
 if sel_district != "Select...":
     st.markdown(f"#### 📍 Ledger: {sel_district}")
-    st.dataframe(format_matrix(df_f[df_f['district_name'] == sel_district].sort_values("fiscal_year")), use_container_width=True)
+    st.dataframe(get_formatted_matrix(df_f[df_f['district_name'] == sel_district]), use_container_width=True)
