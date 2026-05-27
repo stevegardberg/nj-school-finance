@@ -3,12 +3,9 @@ import pandas as pd
 import requests
 import re
 
-# Set page configuration
 st.set_page_config(layout="wide")
 
-# -----------------------------------------------------------------------------
-# 1. LIVE SECURE DATABASE HANDSHAKE
-# -----------------------------------------------------------------------------
+# 1. SETUP
 try:
     headers = {"apikey": st.secrets["headers"]["apikey"], "Authorization": st.secrets["headers"]["Authorization"]}
 except Exception:
@@ -22,68 +19,29 @@ URLS = {
     "Types": f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1/district_metadata_mapping"
 }
 
-NJ_COUNTY_PREFIXES = {"01": "Atlantic", "03": "Bergen", "05": "Burlington", "07": "Camden", "09": "Cape May", "11": "Cumberland", "13": "Essex", "15": "Gloucester", "17": "Hudson", "19": "Hunterdon", "21": "Mercer", "23": "Middlesex", "25": "Monmouth", "27": "Morris", "29": "Ocean", "31": "Passaic", "33": "Salem", "35": "Somerset", "37": "Sussex", "39": "Union", "41": "Warren"}
+# 2. DATA FETCH & VALIDATION
+def fetch_data(url):
+    response = requests.get(url, headers=headers)
+    return pd.DataFrame(response.json()) if response.status_code == 200 else pd.DataFrame()
 
-def fetch_supabase_table_data(base_url):
-    all_records = []
-    page = 0
-    while True:
-        response = requests.get(f"{base_url}?limit=1000&offset={page*1000}", headers=headers, timeout=15)
-        if response.status_code == 200:
-            data = response.json()
-            if not data: break
-            all_records.extend(data)
-            page += 1
-        else: break
-    return all_records
+df_summary = fetch_data(URLS["Summary"])
+df_mapping = fetch_data(URLS["Mapping"])
+df_types = fetch_data(URLS["Types"])
 
-def clean_html_currency_formatter(df):
-    df_temp = df.copy()
-    if "actual_tax_levy" in df_temp.columns and "local_fair_share" in df_temp.columns:
-        df_temp["levy_delta"] = df_temp["actual_tax_levy"].fillna(0) - df_temp["local_fair_share"].fillna(0)
-    else:
-        df_temp["levy_delta"] = 0
-    
-    ordered_cols = ["fiscal_year", "adequacy_budget", "uncapped_aid", "actual_state_aid", "s2_adjustment", "local_fair_share", "actual_tax_levy", "levy_delta", "equalized_valuation", "district_income"]
-    rename_map = {
-        "fiscal_year": "Fiscal Year", "adequacy_budget": "Adequacy Budget", "uncapped_aid": "Uncapped Aid",
-        "actual_state_aid": "Actual State Aid", "s2_adjustment": "Uncapped minus Actual Aid",
-        "local_fair_share": "Local Fair Share", "actual_tax_levy": "Actual Tax Levy",
-        "levy_delta": "Levy Over/Under LFS", "equalized_valuation": "Equalized Valuation", "district_income": "District Income"
-    }
-    df_formatted = df_temp[[c for c in ordered_cols if c in df_temp.columns]].copy()
-    df_formatted.rename(columns=rename_map, inplace=True)
-    for col in df_formatted.columns:
-        if col != "Fiscal Year":
-            df_formatted[col] = df_formatted[col].apply(lambda x: f"${float(x):,.0f}" if pd.notnull(x) and str(x).replace('.','',1).replace('-','',1).isdigit() else "$0")
-    return df_formatted.to_html(index=False, escape=False)
+# Standardization
+for df in [df_summary, df_mapping, df_types]:
+    if "cds_code" in df.columns:
+        df["cds_code"] = df["cds_code"].astype(str).str.zfill(6).str[:6]
 
-# -----------------------------------------------------------------------------
-# 2. DATA PIPELINE
-# -----------------------------------------------------------------------------
-st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
-raw_summary = fetch_supabase_table_data(URLS["Summary"])
-raw_mapping = fetch_supabase_table_data(URLS["Mapping"])
-raw_types = fetch_supabase_table_data(URLS["Types"])
+# Merge
+df_merged = df_summary.merge(df_mapping[["cds_code", "legislative_district"]], on="cds_code", how="left")
+df_merged = df_merged.merge(df_types[["cds_code", "district_type"]], on="cds_code", how="left")
 
-df_all_summary = pd.DataFrame(raw_summary) if raw_summary else pd.DataFrame()
-df_all_mapping = pd.DataFrame(raw_mapping) if raw_mapping else pd.DataFrame()
-df_all_types = pd.DataFrame(raw_types) if raw_types else pd.DataFrame()
+# Metadata Cleanup
+df_merged["assigned_ld"] = df_merged["legislative_district"].apply(lambda x: f"District {x}" if pd.notnull(x) else "Unassigned")
+df_merged["assigned_type"] = df_merged["district_type"].fillna("Unassigned")
 
-# Clean and Prep
-if "cds_code" in df_all_summary.columns: df_all_summary["cds_code"] = df_all_summary["cds_code"].astype(str).str.zfill(6).str[:6]
-if "cds_code" in df_all_mapping.columns: df_all_mapping["cds_code"] = df_all_mapping["cds_code"].astype(str).str.zfill(6).str[:6]
-if "cds_code" in df_all_types.columns: df_all_types["cds_code"] = df_all_types["cds_code"].astype(str).str.zfill(6).str[:6]
-
-df_merged = df_all_summary.copy()
-if not df_all_mapping.empty and "cds_code" in df_all_mapping.columns: df_merged = df_merged.merge(df_all_mapping, on="cds_code", how="left")
-if not df_all_types.empty and "cds_code" in df_all_types.columns: df_merged = df_merged.merge(df_all_types, on="cds_code", how="left")
-
-df_merged["assigned_ld"] = df_merged.get("legislative_district", pd.Series([None]*len(df_merged))).apply(lambda x: f"District {x}" if pd.notnull(x) else "Unassigned")
-df_merged["assigned_type"] = df_merged.get("district_type", pd.Series(["Unassigned"]*len(df_merged)))
-df_merged["assigned_county"] = df_merged["cds_code"].str[:2].map(lambda x: NJ_COUNTY_PREFIXES.get(x, "Unassigned"))
-
-# Resilient sorting: Extracts digits only
+# Sorting Helpers
 def extract_num(s):
     nums = re.findall(r'\d+', str(s))
     return int(nums[0]) if nums else 0
@@ -91,32 +49,21 @@ def extract_num(s):
 master_ld_options = sorted([ld for ld in df_merged["assigned_ld"].unique() if ld != "Unassigned"], key=extract_num)
 master_type_options = sorted([t for t in df_merged["assigned_type"].unique() if t != "Unassigned"])
 
-# -----------------------------------------------------------------------------
-# 3. UI FILTERS & TABS
-# -----------------------------------------------------------------------------
-with st.container():
-    if st.button("🔄 Reset All Filters"):
-        for key in st.session_state.keys(): del st.session_state[key]
-        st.rerun()
-    
-    c1, c2, c3, c4 = st.columns(4)
-    with c1: sel_ld = st.selectbox("1️⃣ Legislative Filter:", ["All Legislative Districts"] + master_ld_options, key="ld")
-    with c2: sel_type = st.selectbox("2️⃣ District Type Filter:", ["All District Types"] + master_type_options, key="type")
-    
-    df_cascade = df_merged.copy()
-    if sel_ld != "All Legislative Districts": df_cascade = df_cascade[df_cascade["assigned_ld"] == sel_ld]
-    if sel_type != "All District Types": df_cascade = df_cascade[df_cascade["assigned_type"] == sel_type]
-    
-    with c3: sel_county = st.selectbox("3️⃣ Local County:", ["All Counties"] + sorted(df_cascade["assigned_county"].dropna().unique().tolist()), key="county")
-    if sel_county != "All Counties": df_cascade = df_cascade[df_cascade["assigned_county"] == sel_county]
-    with c4: sel_district = st.selectbox("4️⃣ Target Local District:", ["Select a District..."] + sorted(df_cascade["district_name"].dropna().unique().tolist()), key="district")
+# 3. UI
+st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
 
-tab1, tab2, tab3 = st.tabs(["⚖️ DATABASE VALIDATION MATRIX", "📊 User Friendly Budget Approp Explorer", "🎯 Academic Return Matrix"])
+c1, c2 = st.columns(2)
+with c1: sel_ld = st.selectbox("1️⃣ Legislative Filter:", ["All Legislative Districts"] + master_ld_options)
+with c2: sel_type = st.selectbox("2️⃣ District Type Filter:", ["All District Types"] + master_type_options)
+
+# 4. TABS
+tab1, tab2, tab3 = st.tabs(["⚖️ DATABASE VALIDATION MATRIX", "📊 District Type Peer Group", "🎯 Academic Return Matrix"])
 
 with tab1:
-    if sel_district != "Select a District...":
-        st.markdown(f"#### 📍 Target District Ledger — {sel_district}")
-        df_render = df_merged[df_merged["district_name"] == sel_district].sort_values("fiscal_year")
-        st.write(clean_html_currency_formatter(df_render), unsafe_allow_html=True)
+    st.write("Validation Matrix Content")
+with tab2:
+    st.markdown("#### 📊 District Type Analysis")
+    if sel_type != "All District Types":
+        st.dataframe(df_merged[df_merged["assigned_type"] == sel_type])
     else:
-        st.info("Select a district to view matrix.")
+        st.write("Please select a District Type to view data.")
