@@ -29,11 +29,11 @@ for df in [df_sum, df_map, df_types]:
     if "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.zfill(6)
 
-df_merged = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
+# MERGE INCLUDING COUNTY_NAME
+df_merged = df_sum.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
 
 # 3. ROBUST CALCULATIONS
-# Only process columns that actually exist in the merged dataframe
 potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy', 
                   'equalized_valuation', 'local_fair_share', 'district_income', 'resident_enrollment']
 
@@ -41,7 +41,6 @@ for col in potential_cols:
     if col in df_merged.columns:
         df_merged[col] = pd.to_numeric(df_merged[col], errors='coerce').fillna(0)
     else:
-        # If column is missing, create it as 0 so calculations don't fail
         df_merged[col] = 0.0
 
 def add_metrics(df):
@@ -61,7 +60,6 @@ def get_formatted_matrix(df):
                  'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS', 
                  'Pct_Change_Levy', 'equalized_valuation', 'Tax_Levy_per_100', 'district_income', 'resident_enrollment']
     
-    # Filter only available columns to prevent KeyErrors here too
     available_cols = [c for c in col_order if c in df.columns]
     df_out = df[available_cols].copy()
     
@@ -80,24 +78,40 @@ def get_formatted_matrix(df):
 
 # 5. UI
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
-c1, c2, c4 = st.columns(3)
+c1, c2, c3, c4 = st.columns(4)
 sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().tolist()))
 sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].dropna().unique().tolist()))
-sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_merged['district_name'].dropna().unique().tolist()))
+sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].dropna().unique().tolist()))
+
+# Filter logic
+df_f = df_merged.copy()
+if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
+if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
+if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
+
+sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().tolist()))
 
 if sel_district != "Select...":
-    target_data = df_merged[df_merged['district_name'] == sel_district]
+    target_data = df_f[df_f['district_name'] == sel_district]
     st.subheader(f"📍 Financial Ledger: {sel_district}")
     st.dataframe(get_formatted_matrix(target_data), use_container_width=True, hide_index=True)
     
     # Peer Averages
-    ld_val = target_data['ld_display'].iloc[0]
-    type_val = target_data['district_type'].iloc[0]
+    ld_val = target_data['ld_display'].iloc[0] if 'ld_display' in target_data.columns else None
+    type_val = target_data['district_type'].iloc[0] if 'district_type' in target_data.columns else None
     target_years = target_data['fiscal_year'].unique()
     
-    for name, group_col, val in [("Legislative District", 'ld_display', ld_val), ("District Type", 'district_type', type_val)]:
-        st.subheader(f"🏛️ {name} Average: {val}")
-        peers = df_merged[df_merged[group_col] == val].copy()
+    if ld_val:
+        st.markdown("---")
+        st.subheader(f"🏛️ Legislative District Average: {ld_val}")
+        peers = df_merged[df_merged['ld_display'] == ld_val].copy()
+        avg = add_metrics(peers).groupby('fiscal_year').mean(numeric_only=True).reset_index()
+        avg = avg[avg['fiscal_year'].isin(target_years)]
+        st.dataframe(get_formatted_matrix(avg), use_container_width=True, hide_index=True)
+
+    if type_val:
+        st.subheader(f"🏫 District Type Average: {type_val}")
+        peers = df_merged[df_merged['district_type'] == type_val].copy()
         avg = add_metrics(peers).groupby('fiscal_year').mean(numeric_only=True).reset_index()
         avg = avg[avg['fiscal_year'].isin(target_years)]
         st.dataframe(get_formatted_matrix(avg), use_container_width=True, hide_index=True)
