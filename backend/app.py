@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import requests
+import re
 
 # Set page configuration
 st.set_page_config(layout="wide")
@@ -69,29 +70,25 @@ df_all_summary = pd.DataFrame(raw_summary) if raw_summary else pd.DataFrame()
 df_all_mapping = pd.DataFrame(raw_mapping) if raw_mapping else pd.DataFrame()
 df_all_types = pd.DataFrame(raw_types) if raw_types else pd.DataFrame()
 
-# Column Validation: Ensure columns exist before transforming
-if "cds_code" in df_all_summary.columns:
-    df_all_summary["cds_code"] = df_all_summary["cds_code"].astype(str).str.zfill(6).str[:6]
+# Clean and Prep
+if "cds_code" in df_all_summary.columns: df_all_summary["cds_code"] = df_all_summary["cds_code"].astype(str).str.zfill(6).str[:6]
+if "cds_code" in df_all_mapping.columns: df_all_mapping["cds_code"] = df_all_mapping["cds_code"].astype(str).str.zfill(6).str[:6]
+if "cds_code" in df_all_types.columns: df_all_types["cds_code"] = df_all_types["cds_code"].astype(str).str.zfill(6).str[:6]
 
-if "cds_code" in df_all_mapping.columns:
-    df_all_mapping["cds_code"] = df_all_mapping["cds_code"].astype(str).str.zfill(6).str[:6]
-
-if "cds_code" in df_all_types.columns:
-    df_all_types["cds_code"] = df_all_types["cds_code"].astype(str).str.zfill(6).str[:6]
-
-# Merge logic only if columns exist
 df_merged = df_all_summary.copy()
-if not df_all_mapping.empty and "cds_code" in df_all_mapping.columns:
-    df_merged = df_merged.merge(df_all_mapping, on="cds_code", how="left")
-if not df_all_types.empty and "cds_code" in df_all_types.columns:
-    df_merged = df_merged.merge(df_all_types, on="cds_code", how="left")
+if not df_all_mapping.empty and "cds_code" in df_all_mapping.columns: df_merged = df_merged.merge(df_all_mapping, on="cds_code", how="left")
+if not df_all_types.empty and "cds_code" in df_all_types.columns: df_merged = df_merged.merge(df_all_types, on="cds_code", how="left")
 
-# Assign metadata safely
 df_merged["assigned_ld"] = df_merged.get("legislative_district", pd.Series([None]*len(df_merged))).apply(lambda x: f"District {x}" if pd.notnull(x) else "Unassigned")
 df_merged["assigned_type"] = df_merged.get("district_type", pd.Series(["Unassigned"]*len(df_merged)))
 df_merged["assigned_county"] = df_merged["cds_code"].str[:2].map(lambda x: NJ_COUNTY_PREFIXES.get(x, "Unassigned"))
 
-master_ld_options = sorted([ld for ld in df_merged["assigned_ld"].unique() if ld != "Unassigned"], key=lambda x: int(x.split()[-1]) if x != "Unassigned" else 0)
+# Resilient sorting: Extracts digits only
+def extract_num(s):
+    nums = re.findall(r'\d+', str(s))
+    return int(nums[0]) if nums else 0
+
+master_ld_options = sorted([ld for ld in df_merged["assigned_ld"].unique() if ld != "Unassigned"], key=extract_num)
 master_type_options = sorted([t for t in df_merged["assigned_type"].unique() if t != "Unassigned"])
 
 # -----------------------------------------------------------------------------
