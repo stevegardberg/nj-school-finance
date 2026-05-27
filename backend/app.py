@@ -25,25 +25,24 @@ df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
 df_enroll = fetch_table("enrollment")
 
-# Create master county mapping from enrollment table (guaranteed accurate per your schema)
-df_county_map = df_enroll[['cds_code', 'county_name']].drop_duplicates(subset=['cds_code'])
-
-# Sum enrollment by cds_code and fiscal_year
+# Total Enrollment by District/Year
 df_total_enroll = df_enroll.groupby(['cds_code', 'fiscal_year'])['student_count'].sum().reset_index()
 df_total_enroll.rename(columns={'student_count': 'resident_enrollment'}, inplace=True)
 
 # Standardize keys
-for df in [df_sum, df_map, df_types, df_total_enroll, df_county_map]:
+for df in [df_sum, df_map, df_types, df_total_enroll]:
     if "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.zfill(6)
 
-# 3. PROPER MERGE
+# 3. MERGE
 df_merged = df_sum.merge(df_total_enroll, on=['cds_code', 'fiscal_year'], how='left')
-df_merged = df_merged.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
+df_merged = df_merged.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
-df_merged = df_merged.merge(df_county_map, on='cds_code', how='left')
 
-# 4. ROBUST CALCULATIONS
+# Force county existence
+df_merged['county_name'] = df_merged['county_name'].fillna('Unknown')
+
+# 4. CALCULATIONS
 potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy', 
                   'equalized_valuation', 'local_fair_share', 'district_income', 'resident_enrollment']
 
