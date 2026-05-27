@@ -19,12 +19,11 @@ def fetch_table(table):
         page += 1
     return pd.DataFrame(all_records)
 
-# 2. LOAD DATA
+# 2. LOAD & MERGE
 df_sum = fetch_table("state_aid_summary")
 df_map = fetch_table("legislative_mapping")
-df_types = fetch_table("vw_district_cohorts") # Using the view instead of the empty mapping table
+df_types = fetch_table("vw_district_cohorts")
 
-# 3. MERGE & CLEAN
 df_sum["cds_code"] = df_sum["cds_code"].astype(str).str.zfill(6)
 df_map["cds_code"] = df_map["cds_code"].astype(str).str.zfill(6)
 df_types["cds_code"] = df_types["cds_code"].astype(str).str.zfill(6)
@@ -32,31 +31,32 @@ df_types["cds_code"] = df_types["cds_code"].astype(str).str.zfill(6)
 df_merged = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
 
-# Fill defaults
-df_merged['ld_display'] = df_merged['ld_display'].fillna("Unassigned")
-df_merged['district_type'] = df_merged['district_type'].fillna("Unassigned")
-
-# Calculations
+# 3. CALCULATIONS
 for col in ['actual_state_aid', 'adequacy_budget', 'actual_tax_levy', 'equalized_valuation']:
     df_merged[col] = pd.to_numeric(df_merged[col], errors='coerce').fillna(0)
 df_merged['YoY_State_Aid_Diff'] = df_merged.groupby('district_name')['actual_state_aid'].diff().fillna(0)
 df_merged['Tax_Levy_per_100'] = (df_merged['actual_tax_levy'] / df_merged['equalized_valuation'].replace(0, 1)) * 100
 
-# 4. UI
+# 4. UI FILTERS (Cascading)
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
 if st.button("🔄 Reset"): st.rerun()
 
-c1, c2, c3 = st.columns(3)
-sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().tolist()))
-sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].unique().tolist()))
-sel_district = c3.selectbox("3️⃣ District:", ["Select..."] + sorted(df_merged['district_name'].dropna().unique().tolist()))
+c1, c2, c3, c4 = st.columns(4)
+sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].fillna("Unassigned").unique().tolist()))
+sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].fillna("Unassigned").unique().tolist()))
+sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].fillna("Unassigned").unique().tolist()))
 
-# 5. DISPLAY
+# Apply Cascading Logic
+df_f = df_merged.copy()
+if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
+if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
+if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
+
+sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().tolist()))
+
+# 5. MATRIX
 if sel_district != "Select...":
-    df_f = df_merged[df_merged['district_name'] == sel_district]
-    if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
-    if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
-    
+    df_render = df_f[df_f['district_name'] == sel_district].sort_values("fiscal_year")
     col_order = ['fiscal_year', 'actual_state_aid', 'YoY_State_Aid_Diff', 'adequacy_budget', 
                  'actual_tax_levy', 'equalized_valuation', 'Tax_Levy_per_100']
-    st.dataframe(df_f.sort_values("fiscal_year")[col_order], use_container_width=True)
+    st.dataframe(df_render[col_order], use_container_width=True)
