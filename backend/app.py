@@ -25,21 +25,26 @@ df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
 df_enroll = fetch_table("enrollment")
 
-# Total Enrollment by District/Year
+# Enrollment: Aggregation
 df_total_enroll = df_enroll.groupby(['cds_code', 'fiscal_year'])['student_count'].sum().reset_index()
 df_total_enroll.rename(columns={'student_count': 'resident_enrollment'}, inplace=True)
 
+# County Mapping: Master lookup
+df_county_map = df_enroll[['cds_code', 'county_name']].drop_duplicates(subset=['cds_code'])
+
 # Standardize keys
-for df in [df_sum, df_map, df_types, df_total_enroll]:
+for df in [df_sum, df_map, df_types, df_total_enroll, df_county_map]:
     if "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.zfill(6)
 
 # 3. MERGE
 df_merged = df_sum.merge(df_total_enroll, on=['cds_code', 'fiscal_year'], how='left')
-df_merged = df_merged.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
+df_merged = df_merged.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
+df_merged = df_merged.merge(df_county_map, on='cds_code', how='left')
 
-# Force county existence
+# Safety check for missing columns
+if 'county_name' not in df_merged.columns: df_merged['county_name'] = 'Unknown'
 df_merged['county_name'] = df_merged['county_name'].fillna('Unknown')
 
 # 4. CALCULATIONS
@@ -65,7 +70,6 @@ def get_formatted_matrix(df):
     col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded', 
                  'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS', 
                  'Pct_Change_Levy', 'equalized_valuation', 'Tax_Levy_per_100', 'district_income', 'resident_enrollment']
-    
     available_cols = [c for c in col_order if c in df.columns]
     df_out = df[available_cols].copy()
     rename_map = {'fiscal_year': 'Fiscal Year', 'adequacy_budget': 'Adequacy Budget', 'uncapped_aid': 'Uncapped Aid', 
@@ -73,7 +77,6 @@ def get_formatted_matrix(df):
                   'local_fair_share': 'Local Fair Share', 'actual_tax_levy': 'Actual Levy', 'Over_Under_LFS': 'Over/Under LFS', 
                   'Pct_Change_Levy': '% Change Actual Levy', 'equalized_valuation': 'Equalized Valuation', 
                   'Tax_Levy_per_100': 'Levy per $100', 'district_income': 'District Income', 'resident_enrollment': 'Resident Enrollment'}
-    
     df_out = df_out.rename(columns=rename_map)
     for col in df_out.columns:
         if col != 'Fiscal Year':
