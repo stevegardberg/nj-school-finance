@@ -32,7 +32,8 @@ df_merged = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how=
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
 
 # 3. CALCULATIONS
-for col in ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy', 'equalized_valuation', 'local_fair_share', 'district_income']:
+numeric_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy', 'equalized_valuation', 'local_fair_share', 'district_income']
+for col in numeric_cols:
     df_merged[col] = pd.to_numeric(df_merged[col], errors='coerce').fillna(0)
 
 df_merged = df_merged.sort_values(['district_name', 'fiscal_year'])
@@ -42,7 +43,7 @@ df_merged['Over_Under_LFS'] = df_merged['actual_tax_levy'] - df_merged['local_fa
 df_merged['Pct_Change_Levy'] = df_merged.groupby('district_name')['actual_tax_levy'].pct_change().fillna(0)
 df_merged['Tax_Levy_per_100'] = (df_merged['actual_tax_levy'] / df_merged['equalized_valuation'].replace(0, 1)) * 100
 
-# 4. FORMATTING FUNCTION
+# 4. FORMATTING FUNCTION (WITH ERROR HANDLING)
 def get_formatted_matrix(df):
     col_order = [
         'fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 
@@ -61,12 +62,14 @@ def get_formatted_matrix(df):
     df_out = df[col_order].rename(columns=rename_map)
     
     for col in df_out.columns:
-        if col in ['% Change Actual Aid', '% Change Actual Levy']:
-            df_out[col] = df_out[col].apply(lambda x: f"{float(x):.2%}")
-        elif col == 'Levy per $100':
-            df_out[col] = df_out[col].apply(lambda x: f"{float(x):.4f}")
-        else:
-            df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}")
+        def safe_format(val, cname):
+            try:
+                v = float(str(val).replace('$', '').replace(',', ''))
+                if cname in ['% Change Actual Aid', '% Change Actual Levy']: return f"{v:.2%}"
+                if cname == 'Levy per $100': return f"{v:.4f}"
+                return f"${v:,.0f}"
+            except: return str(val)
+        df_out[col] = df_out[col].apply(lambda x: safe_format(x, col))
     return df_out
 
 # 5. UI
