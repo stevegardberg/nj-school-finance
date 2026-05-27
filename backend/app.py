@@ -62,31 +62,22 @@ def get_formatted_matrix(df):
         'district_income': 'District Income'
     }
     df_out = df[col_order].rename(columns=rename_map)
+    
     for col in df_out.columns:
+        # Currency formatting for financial columns
         if any(x in col for x in ['Actual', 'Budget', 'Aid', 'Levy', 'Valuation', 'Income', 'Over/Under']):
             df_out[col] = df_out[col].apply(lambda x: f"${x:,.0f}")
-        elif '%' in col:
+        # Percent formatting (2 decimal places)
+        elif '% Change' in col:
             df_out[col] = df_out[col].apply(lambda x: f"{x:.2%}")
+        # Levy per $100 (4 decimal places)
         elif 'per $100' in col:
             df_out[col] = df_out[col].apply(lambda x: f"{x:.4f}")
+            
     return df_out
 
-# 5. UI
-st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
-if st.button("🔄 Reset"): st.rerun()
-
-c1, c2, c3, c4 = st.columns(4)
-sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].fillna("Unassigned").unique().tolist()))
-sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].fillna("Unassigned").unique().tolist()))
-sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].fillna("Unassigned").unique().tolist()))
-
-df_f = df_merged.copy()
-if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
-if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
-if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
-
-sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().tolist()))
-
+# 5. UI DISPLAY (Ensuring clean matrix output)
 if sel_district != "Select...":
     st.markdown(f"#### 📍 Ledger: {sel_district}")
-    st.dataframe(get_formatted_matrix(df_f[df_f['district_name'] == sel_district]), use_container_width=True)
+    # Displaying dataframe without index to avoid showing row numbers or accidental header rows
+    st.dataframe(get_formatted_matrix(df_f[df_f['district_name'] == sel_district]), use_container_width=True, hide_index=True)
