@@ -35,13 +35,14 @@ df_summary = fetch_all_data(URLS["Summary"])
 df_mapping = fetch_all_data(URLS["Mapping"])
 df_types = fetch_all_data(URLS["Types"])
 
-# 3. SCHEMA INITIALIZATION & MERGE
-# Initialize with empty columns to prevent KeyErrors
+# 3. ROBUST MERGE ENGINE
 df_merged = df_summary.copy()
+
+# Add placeholders to ensure columns exist
 df_merged["legislative_district"] = None
 df_merged["district_type"] = "Unassigned"
 
-# Clean Keys
+# Clean keys
 for df in [df_mapping, df_types]:
     if not df.empty and "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.zfill(6).str[:6]
@@ -49,14 +50,18 @@ for df in [df_mapping, df_types]:
 if not df_merged.empty and "cds_code" in df_merged.columns:
     df_merged["cds_code"] = df_merged["cds_code"].astype(str).str.zfill(6).str[:6]
 
-# Safe Merges
-if not df_mapping.empty and "cds_code" in df_mapping.columns:
-    df_merged = df_merged.merge(df_mapping[["cds_code", "legislative_district"]], on="cds_code", how="left")
+# Perform safe merges
+if not df_mapping.empty and "cds_code" in df_mapping.columns and "legislative_district" in df_mapping.columns:
+    df_merged = df_merged.drop(columns=["legislative_district"]).merge(df_mapping[["cds_code", "legislative_district"]], on="cds_code", how="left")
 
-if not df_types.empty and "cds_code" in df_types.columns:
-    df_merged = df_merged.merge(df_types[["cds_code", "district_type"]], on="cds_code", how="left")
+if not df_types.empty and "cds_code" in df_types.columns and "district_type" in df_types.columns:
+    df_merged = df_merged.drop(columns=["district_type"]).merge(df_types[["cds_code", "district_type"]], on="cds_code", how="left")
 
-# 4. CLEANUP & METADATA
+# 4. METADATA & CLEANUP
+# Ensure these columns exist after potential merges
+if "legislative_district" not in df_merged.columns: df_merged["legislative_district"] = None
+if "district_type" not in df_merged.columns: df_merged["district_type"] = "Unassigned"
+
 df_merged["assigned_ld"] = df_merged["legislative_district"].apply(lambda x: f"District {int(x)}" if pd.notnull(x) else "Unassigned")
 df_merged["assigned_type"] = df_merged["district_type"].fillna("Unassigned")
 df_merged["assigned_county"] = df_merged["cds_code"].str[:2].map(lambda x: {"01": "Atlantic", "03": "Bergen", "05": "Burlington", "07": "Camden", "09": "Cape May", "11": "Cumberland", "13": "Essex", "15": "Gloucester", "17": "Hudson", "19": "Hunterdon", "21": "Mercer", "23": "Middlesex", "25": "Monmouth", "27": "Morris", "29": "Ocean", "31": "Passaic", "33": "Salem", "35": "Somerset", "37": "Sussex", "39": "Union", "41": "Warren"}.get(x, "Unassigned"))
@@ -81,8 +86,7 @@ sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_casca
 tab1, tab2, tab3 = st.tabs(["⚖️ DATABASE VALIDATION MATRIX", "📊 District Type Peer Group", "🎯 Academic Return Matrix"])
 with tab1:
     if sel_district != "Select...":
-        df_render = df_cascade[df_cascade["district_name"] == sel_district].sort_values("fiscal_year")
-        st.dataframe(df_render, use_container_width=True)
+        st.dataframe(df_cascade[df_cascade["district_name"] == sel_district].sort_values("fiscal_year"), use_container_width=True)
 with tab2:
     st.markdown("#### 📊 District Type Peer Group")
     st.dataframe(df_cascade)
