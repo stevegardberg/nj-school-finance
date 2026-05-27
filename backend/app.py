@@ -37,7 +37,6 @@ def fetch_supabase_table_data(base_url):
     return all_records
 
 def clean_html_currency_formatter(df):
-    """Calculates, orders, and formats financial columns (No decimals)."""
     df_temp = df.copy()
     if "actual_tax_levy" in df_temp.columns and "local_fair_share" in df_temp.columns:
         df_temp["levy_delta"] = df_temp["actual_tax_levy"].fillna(0) - df_temp["local_fair_share"].fillna(0)
@@ -70,19 +69,22 @@ df_all_summary = pd.DataFrame(raw_summary) if raw_summary else pd.DataFrame()
 df_all_mapping = pd.DataFrame(raw_mapping) if raw_mapping else pd.DataFrame()
 df_all_types = pd.DataFrame(raw_types) if raw_types else pd.DataFrame()
 
-# Diagnostic log for type table
-st.sidebar.write(f"Metadata Table Rows: {len(df_all_types)}")
-
+# Clean and Prep
 df_all_summary["cds_code"] = df_all_summary["cds_code"].astype(str).str.zfill(6).str[:6]
-leg_dict = dict(zip(df_all_mapping["cds_code"].astype(str).str.zfill(6), df_all_mapping["legislative_district"])) if not df_all_mapping.empty and "cds_code" in df_all_mapping.columns else {}
-type_dict = dict(zip(df_all_types["cds_code"].astype(str).str.zfill(6), df_all_types["district_type"])) if not df_all_types.empty and "cds_code" in df_all_types.columns and "district_type" in df_all_types.columns else {}
+df_all_mapping["cds_code"] = df_all_mapping["cds_code"].astype(str).str.zfill(6).str[:6]
+df_all_types["cds_code"] = df_all_types["cds_code"].astype(str).str.zfill(6).str[:6]
 
-df_all_summary["assigned_ld"] = df_all_summary["cds_code"].map(lambda x: f"District {leg_dict.get(x)}" if leg_dict.get(x) else None)
-df_all_summary["assigned_type"] = df_all_summary["cds_code"].map(lambda x: type_dict.get(x))
-df_all_summary["assigned_county"] = df_all_summary["cds_code"].str[:2].map(lambda x: NJ_COUNTY_PREFIXES.get(x))
+# ROBUST JOIN: Merge summary with mapping and types
+df_merged = df_all_summary.merge(df_all_mapping, on="cds_code", how="left")
+df_merged = df_merged.merge(df_all_types, on="cds_code", how="left")
 
-master_ld_options = sorted([ld for ld in df_all_summary["assigned_ld"].dropna().unique()], key=lambda x: int(x.split()[-1]))
-master_type_options = sorted([t for t in df_all_summary["assigned_type"].dropna().unique()])
+# Clean up results
+df_merged["assigned_ld"] = df_merged["legislative_district"].apply(lambda x: f"District {x}" if pd.notnull(x) else "Unassigned")
+df_merged["assigned_type"] = df_merged["district_type"].fillna("Unassigned")
+df_merged["assigned_county"] = df_all_summary["cds_code"].str[:2].map(lambda x: NJ_COUNTY_PREFIXES.get(x, "Unassigned"))
+
+master_ld_options = sorted([ld for ld in df_merged["assigned_ld"].unique() if ld != "Unassigned"], key=lambda x: int(x.split()[-1]) if x != "Unassigned" else 0)
+master_type_options = sorted([t for t in df_merged["assigned_type"].unique() if t != "Unassigned"])
 
 # -----------------------------------------------------------------------------
 # 3. UI FILTERS & TABS
@@ -96,7 +98,7 @@ with st.container():
     with c1: sel_ld = st.selectbox("1️⃣ Legislative Filter:", ["All Legislative Districts"] + master_ld_options, key="ld")
     with c2: sel_type = st.selectbox("2️⃣ District Type Filter:", ["All District Types"] + master_type_options, key="type")
     
-    df_cascade = df_all_summary.copy()
+    df_cascade = df_merged.copy()
     if sel_ld != "All Legislative Districts": df_cascade = df_cascade[df_cascade["assigned_ld"] == sel_ld]
     if sel_type != "All District Types": df_cascade = df_cascade[df_cascade["assigned_type"] == sel_type]
     
@@ -109,7 +111,7 @@ tab1, tab2, tab3 = st.tabs(["⚖️ DATABASE VALIDATION MATRIX", "📊 User Frie
 with tab1:
     if sel_district != "Select a District...":
         st.markdown(f"#### 📍 Target District Ledger — {sel_district}")
-        df_render = df_all_summary[df_all_summary["district_name"] == sel_district].sort_values("fiscal_year")
+        df_render = df_merged[df_merged["district_name"] == sel_district].sort_values("fiscal_year")
         st.write(clean_html_currency_formatter(df_render), unsafe_allow_html=True)
     else:
         st.info("Select a district to view matrix.")
