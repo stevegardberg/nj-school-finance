@@ -1,57 +1,62 @@
 import streamlit as st
-import pandas as pd
 import requests
+import pandas as pd
 
 st.set_page_config(layout="wide")
 
 # 1. SETUP
 headers = {"apikey": st.secrets["headers"]["apikey"], "Authorization": st.secrets["headers"]["Authorization"]}
-SUPABASE_PROJECT_ID = "exqwkzidanuywriatmhi"
-URLS = {
-    "Summary": f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1/state_aid_summary",
-    "Mapping": f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1/legislative_mapping",
-    "Types": f"https://{SUPABASE_PROJECT_ID}.supabase.co/rest/v1/district_metadata_mapping"
-}
+BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
 
 @st.cache_data(ttl=3600)
-def fetch_data(url):
+def fetch_table(table):
     all_records = []
     page = 0
     while True:
-        res = requests.get(f"{url}?limit=1000&offset={page*1000}", headers=headers)
+        res = requests.get(f"{BASE_URL}/{table}?limit=1000&offset={page*1000}", headers=headers)
         if res.status_code != 200 or not res.json(): break
         all_records.extend(res.json())
         page += 1
-    return all_records
+    return pd.DataFrame(all_records)
 
-# 2. LOAD & MAP (Defensive logic)
-df_all_summary = pd.DataFrame(fetch_data(URLS["Summary"]))
-df_all_mapping = pd.DataFrame(fetch_data(URLS["Mapping"]))
-df_all_types = pd.DataFrame(fetch_data(URLS["Types"]))
+# 2. LOAD DATA
+df_sum = fetch_table("state_aid_summary")
+df_map = fetch_table("legislative_mapping")
+df_types = fetch_table("vw_district_cohorts") # Using the view instead of the empty mapping table
 
-# Clean codes
-df_all_summary["cds_code"] = df_all_summary["cds_code"].astype(str).str.zfill(6).str[:6]
+# 3. MERGE & CLEAN
+df_sum["cds_code"] = df_sum["cds_code"].astype(str).str.zfill(6)
+df_map["cds_code"] = df_map["cds_code"].astype(str).str.zfill(6)
+df_types["cds_code"] = df_types["cds_code"].astype(str).str.zfill(6)
 
-# Create dictionaries only if data exists
-leg_dict = dict(zip(df_all_mapping["cds_code"].astype(str).str.zfill(6), df_all_mapping["legislative_district"])) if not df_all_mapping.empty else {}
-type_dict = dict(zip(df_all_types["cds_code"].astype(str).str.zfill(6), df_all_types["district_type"])) if not df_all_types.empty else {}
+df_merged = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
+df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
 
-df_all_summary["assigned_ld"] = df_all_summary["cds_code"].map(lambda x: f"District {leg_dict.get(x)}" if leg_dict.get(x) else "Unassigned")
-df_all_summary["assigned_type"] = df_all_summary["cds_code"].map(lambda x: type_dict.get(x, "Unassigned"))
+# Fill defaults
+df_merged['ld_display'] = df_merged['ld_display'].fillna("Unassigned")
+df_merged['district_type'] = df_merged['district_type'].fillna("Unassigned")
 
-# 3. UI
+# Calculations
+for col in ['actual_state_aid', 'adequacy_budget', 'actual_tax_levy', 'equalized_valuation']:
+    df_merged[col] = pd.to_numeric(df_merged[col], errors='coerce').fillna(0)
+df_merged['YoY_State_Aid_Diff'] = df_merged.groupby('district_name')['actual_state_aid'].diff().fillna(0)
+df_merged['Tax_Levy_per_100'] = (df_merged['actual_tax_levy'] / df_merged['equalized_valuation'].replace(0, 1)) * 100
+
+# 4. UI
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
-if st.button("🔄 Reset All"): st.rerun()
+if st.button("🔄 Reset"): st.rerun()
 
-c1, c2, c3, c4 = st.columns(4)
-sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_all_summary["assigned_ld"].unique().tolist()))
-sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_all_summary["assigned_type"].unique().tolist()))
+c1, c2, c3 = st.columns(3)
+sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().tolist()))
+sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].unique().tolist()))
+sel_district = c3.selectbox("3️⃣ District:", ["Select..."] + sorted(df_merged['district_name'].dropna().unique().tolist()))
 
-df_c = df_all_summary.copy()
-if sel_ld != "All": df_c = df_c[df_c["assigned_ld"] == sel_ld]
-if sel_type != "All": df_c = df_c[df_c["assigned_type"] == sel_type]
-
-sel_district = c4.selectbox("4️⃣ Target District:", ["Select..."] + sorted(df_c["district_name"].dropna().unique().tolist()))
-
+# 5. DISPLAY
 if sel_district != "Select...":
-    st.dataframe(df_c[df_c["district_name"] == sel_district].sort_values("fiscal_year"), use_container_width=True)
+    df_f = df_merged[df_merged['district_name'] == sel_district]
+    if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
+    if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
+    
+    col_order = ['fiscal_year', 'actual_state_aid', 'YoY_State_Aid_Diff', 'adequacy_budget', 
+                 'actual_tax_levy', 'equalized_valuation', 'Tax_Levy_per_100']
+    st.dataframe(df_f.sort_values("fiscal_year")[col_order], use_container_width=True)
