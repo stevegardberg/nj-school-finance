@@ -35,28 +35,35 @@ df_summary = fetch_all_data(URLS["Summary"])
 df_mapping = fetch_all_data(URLS["Mapping"])
 df_types = fetch_all_data(URLS["Types"])
 
-# Standardize IDs
-for df in [df_summary, df_mapping, df_types]:
-    if "cds_code" in df.columns:
+# 3. SCHEMA INITIALIZATION & MERGE
+# Initialize with empty columns to prevent KeyErrors
+df_merged = df_summary.copy()
+df_merged["legislative_district"] = None
+df_merged["district_type"] = "Unassigned"
+
+# Clean Keys
+for df in [df_mapping, df_types]:
+    if not df.empty and "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.zfill(6).str[:6]
 
-# Merge & Cleanup
-df_merged = df_summary.copy()
-if not df_mapping.empty:
+if not df_merged.empty and "cds_code" in df_merged.columns:
+    df_merged["cds_code"] = df_merged["cds_code"].astype(str).str.zfill(6).str[:6]
+
+# Safe Merges
+if not df_mapping.empty and "cds_code" in df_mapping.columns:
     df_merged = df_merged.merge(df_mapping[["cds_code", "legislative_district"]], on="cds_code", how="left")
-if not df_types.empty:
+
+if not df_types.empty and "cds_code" in df_types.columns:
     df_merged = df_merged.merge(df_types[["cds_code", "district_type"]], on="cds_code", how="left")
 
-# Cleanup
+# 4. CLEANUP & METADATA
 df_merged["assigned_ld"] = df_merged["legislative_district"].apply(lambda x: f"District {int(x)}" if pd.notnull(x) else "Unassigned")
 df_merged["assigned_type"] = df_merged["district_type"].fillna("Unassigned")
 df_merged["assigned_county"] = df_merged["cds_code"].str[:2].map(lambda x: {"01": "Atlantic", "03": "Bergen", "05": "Burlington", "07": "Camden", "09": "Cape May", "11": "Cumberland", "13": "Essex", "15": "Gloucester", "17": "Hudson", "19": "Hunterdon", "21": "Mercer", "23": "Middlesex", "25": "Monmouth", "27": "Morris", "29": "Ocean", "31": "Passaic", "33": "Salem", "35": "Somerset", "37": "Sussex", "39": "Union", "41": "Warren"}.get(x, "Unassigned"))
 
-# 3. UI
+# 5. UI
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
-
-if st.button("🔄 Reset All Filters"):
-    st.rerun()
+if st.button("🔄 Reset All Filters"): st.rerun()
 
 c1, c2, c3, c4 = st.columns(4)
 sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged["assigned_ld"].unique().tolist(), key=lambda x: int(re.findall(r'\d+', x)[0]) if re.findall(r'\d+', x) else 0))
@@ -70,15 +77,11 @@ if sel_county != "All": df_cascade = df_cascade[df_cascade["assigned_county"] ==
 
 sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_cascade["district_name"].dropna().unique().tolist()))
 
-# 4. COLUMN ORDERING (The requested matrix columns)
-ordered_cols = ["fiscal_year", "adequacy_budget", "uncapped_aid", "actual_state_aid", "s2_adjustment", "local_fair_share", "actual_tax_levy", "equalized_valuation", "district_income"]
-display_cols = [c for c in ordered_cols if c in df_cascade.columns]
-
+# 6. TABS
 tab1, tab2, tab3 = st.tabs(["⚖️ DATABASE VALIDATION MATRIX", "📊 District Type Peer Group", "🎯 Academic Return Matrix"])
-
 with tab1:
     if sel_district != "Select...":
-        df_render = df_cascade[df_cascade["district_name"] == sel_district].sort_values("fiscal_year")[display_cols]
+        df_render = df_cascade[df_cascade["district_name"] == sel_district].sort_values("fiscal_year")
         st.dataframe(df_render, use_container_width=True)
 with tab2:
     st.markdown("#### 📊 District Type Peer Group")
