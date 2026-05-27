@@ -43,23 +43,22 @@ df_merged['Over_Under_LFS'] = df_merged['actual_tax_levy'] - df_merged['local_fa
 df_merged['Pct_Change_Levy'] = df_merged.groupby('district_name')['actual_tax_levy'].pct_change().fillna(0)
 df_merged['Tax_Levy_per_100'] = (df_merged['actual_tax_levy'] / df_merged['equalized_valuation'].replace(0, 1)) * 100
 
-# 4. FORMATTING FUNCTION
+# 4. FORMATTING FUNCTION (Unified formatting)
 def get_formatted_matrix(df, is_summary=False):
-    cols = ['fiscal_year', 'district_name', 'actual_state_aid', 'adequacy_budget', 'actual_tax_levy', 'Tax_Levy_per_100']
-    rename_map = {'fiscal_year': 'Fiscal Year', 'district_name': 'District', 'actual_state_aid': 'Actual Aid', 'adequacy_budget': 'Adequacy Budget', 'actual_tax_levy': 'Actual Levy', 'Tax_Levy_per_100': 'Levy per $100'}
-    
-    if not is_summary:
-        col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded', 'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS', 'Pct_Change_Levy', 'equalized_valuation', 'Tax_Levy_per_100', 'district_income']
-        rename_map.update({'uncapped_aid': 'Uncapped Aid', 'Over_Under_Funded': 'Over/Under Funded', 'Pct_Change_Aid': '% Change Actual Aid', 'local_fair_share': 'Local Fair Share', 'Over_Under_LFS': 'Over/Under LFS', 'Pct_Change_Levy': '% Change Actual Levy', 'equalized_valuation': 'Equalized Valuation', 'district_income': 'District Income'})
-        df_out = df[col_order].rename(columns=rename_map)
+    if is_summary:
+        col_order = ['fiscal_year', 'district_name', 'actual_state_aid', 'adequacy_budget', 'actual_tax_levy', 'Tax_Levy_per_100']
+        rename_map = {'fiscal_year': 'Fiscal Year', 'district_name': 'District', 'actual_state_aid': 'Actual Aid', 'adequacy_budget': 'Adequacy Budget', 'actual_tax_levy': 'Actual Levy', 'Tax_Levy_per_100': 'Levy per $100'}
     else:
-        df_out = df[cols].rename(columns=rename_map)
-
+        col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded', 'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS', 'Pct_Change_Levy', 'equalized_valuation', 'Tax_Levy_per_100', 'district_income']
+        rename_map = {'fiscal_year': 'Fiscal Year', 'adequacy_budget': 'Adequacy Budget', 'uncapped_aid': 'Uncapped Aid', 'actual_state_aid': 'Actual Aid', 'Over_Under_Funded': 'Over/Under Funded', 'Pct_Change_Aid': '% Change Actual Aid', 'local_fair_share': 'Local Fair Share', 'actual_tax_levy': 'Actual Levy', 'Over_Under_LFS': 'Over/Under LFS', 'Pct_Change_Levy': '% Change Actual Levy', 'equalized_valuation': 'Equalized Valuation', 'Tax_Levy_per_100': 'Levy per $100', 'district_income': 'District Income'}
+    
+    df_out = df[col_order].rename(columns=rename_map)
+    
     def safe_format(val, cname):
         try:
             v = float(str(val).replace('$', '').replace(',', ''))
-            if '%' in cname: return f"{v:.2%}"
-            if 'per $100' in cname: return f"{v:.4f}"
+            if '% Change' in cname: return f"{v:.2%}"
+            if 'Levy per $100' in cname: return f"{v:.4f}"
             return f"${v:,.0f}"
         except: return str(val)
 
