@@ -25,26 +25,24 @@ df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
 df_enroll = fetch_table("enrollment")
 
-# Enrollment: Aggregation
+# Total Enrollment by District/Year
 df_total_enroll = df_enroll.groupby(['cds_code', 'fiscal_year'])['student_count'].sum().reset_index()
 df_total_enroll.rename(columns={'student_count': 'resident_enrollment'}, inplace=True)
 
-# County Mapping: Master lookup
-df_county_map = df_enroll[['cds_code', 'county_name']].drop_duplicates(subset=['cds_code'])
-
 # Standardize keys
-for df in [df_sum, df_map, df_types, df_total_enroll, df_county_map]:
+for df in [df_sum, df_map, df_types, df_total_enroll]:
     if "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.zfill(6)
 
 # 3. MERGE
+# We pull county_name directly from df_sum as verified by your schema
 df_merged = df_sum.merge(df_total_enroll, on=['cds_code', 'fiscal_year'], how='left')
 df_merged = df_merged.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
-df_merged = df_merged.merge(df_county_map, on='cds_code', how='left')
 
-# Safety check for missing columns
-if 'county_name' not in df_merged.columns: df_merged['county_name'] = 'Unknown'
+# Ensure county_name exists
+if 'county_name' not in df_merged.columns:
+    df_merged['county_name'] = 'Unknown'
 df_merged['county_name'] = df_merged['county_name'].fillna('Unknown')
 
 # 4. CALCULATIONS
