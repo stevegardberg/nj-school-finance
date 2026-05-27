@@ -19,7 +19,7 @@ def fetch_table(table):
         page += 1
     return pd.DataFrame(all_records)
 
-# 2. DATA LOAD & MERGE
+# 2. LOAD & MERGE
 df_sum = fetch_table("state_aid_summary")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
@@ -45,15 +45,9 @@ df_merged['Tax_Levy_per_100'] = (df_merged['actual_tax_levy'] / df_merged['equal
 
 # 4. FORMATTING FUNCTION
 def get_formatted_matrix(df, is_summary=False):
-    # This function now handles both single-district and multi-district (LD Summary) views
     cols = ['fiscal_year', 'district_name', 'actual_state_aid', 'adequacy_budget', 'actual_tax_levy', 'Tax_Levy_per_100']
-    rename_map = {
-        'fiscal_year': 'Fiscal Year', 'district_name': 'District',
-        'actual_state_aid': 'Actual Aid', 'adequacy_budget': 'Adequacy Budget',
-        'actual_tax_levy': 'Actual Levy', 'Tax_Levy_per_100': 'Levy per $100'
-    }
+    rename_map = {'fiscal_year': 'Fiscal Year', 'district_name': 'District', 'actual_state_aid': 'Actual Aid', 'adequacy_budget': 'Adequacy Budget', 'actual_tax_levy': 'Actual Levy', 'Tax_Levy_per_100': 'Levy per $100'}
     
-    # If not summary, use the full column set requested previously
     if not is_summary:
         col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded', 'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS', 'Pct_Change_Levy', 'equalized_valuation', 'Tax_Levy_per_100', 'district_income']
         rename_map.update({'uncapped_aid': 'Uncapped Aid', 'Over_Under_Funded': 'Over/Under Funded', 'Pct_Change_Aid': '% Change Actual Aid', 'local_fair_share': 'Local Fair Share', 'Over_Under_LFS': 'Over/Under LFS', 'Pct_Change_Levy': '% Change Actual Levy', 'equalized_valuation': 'Equalized Valuation', 'district_income': 'District Income'})
@@ -70,7 +64,7 @@ def get_formatted_matrix(df, is_summary=False):
         except: return str(val)
 
     for col in df_out.columns:
-        if col != 'Fiscal Year' and col != 'District':
+        if col not in ['Fiscal Year', 'District']:
             df_out[col] = df_out[col].apply(lambda x: safe_format(x, col))
     return df_out
 
@@ -90,16 +84,14 @@ if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
 
 sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().tolist()))
 
-# Ledger (Selected District)
 if sel_district != "Select...":
     st.markdown(f"#### 📍 Ledger: {sel_district}")
     st.dataframe(get_formatted_matrix(df_f[df_f['district_name'] == sel_district], is_summary=False), use_container_width=True, hide_index=True)
 
-# Legislative District Summary (All districts in current LD filter)
-if sel_ld != "All":
-    st.markdown(f"---")
-    st.markdown(f"#### 🏛️ Legislative District Summary: {sel_ld}")
-    # Display the most recent fiscal year for all districts in this LD
-    latest_year = df_f['fiscal_year'].max()
-    df_ld_summary = df_f[df_f['fiscal_year'] == latest_year]
+st.markdown(f"---")
+summary_title = f"🏛️ Summary: {sel_ld}" if sel_ld != "All" else "🏛️ State-Wide District Summary (Most Recent Year)"
+st.markdown(f"#### {summary_title}")
+latest_year = df_f['fiscal_year'].max()
+df_ld_summary = df_f[df_f['fiscal_year'] == latest_year]
+if not df_ld_summary.empty:
     st.dataframe(get_formatted_matrix(df_ld_summary, is_summary=True), use_container_width=True, hide_index=True)
