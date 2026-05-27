@@ -29,9 +29,13 @@ for df in [df_sum, df_map, df_types]:
     if "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.zfill(6)
 
-# MERGE INCLUDING COUNTY_NAME
-df_merged = df_sum.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
+# Merge
+df_merged = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
+
+# Add missing columns safely if they weren't in the fetch
+if 'county_name' not in df_merged.columns:
+    df_merged['county_name'] = 'Unassigned'
 
 # 3. ROBUST CALCULATIONS
 potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy', 
@@ -49,7 +53,7 @@ def add_metrics(df):
     df['Pct_Change_Levy'] = df.groupby('district_name')['actual_tax_levy'].pct_change().fillna(0)
     df['Over_Under_Funded'] = df['actual_state_aid'] - df['uncapped_aid']
     df['Over_Under_LFS'] = df['actual_tax_levy'] - df['local_fair_share']
-    df['Tax_Levy_per_100'] = (df['actual_tax_levy'] / df['equalized_valuation'].replace(0, 1)) * 100
+    df['Tax_Levy_per_100'] = (df['actual_tax_levy'] / df_merged['equalized_valuation'].replace(0, 1)) * 100
     return df
 
 df_merged = add_metrics(df_merged)
@@ -96,7 +100,6 @@ if sel_district != "Select...":
     st.subheader(f"📍 Financial Ledger: {sel_district}")
     st.dataframe(get_formatted_matrix(target_data), use_container_width=True, hide_index=True)
     
-    # Peer Averages
     ld_val = target_data['ld_display'].iloc[0] if 'ld_display' in target_data.columns else None
     type_val = target_data['district_type'].iloc[0] if 'district_type' in target_data.columns else None
     target_years = target_data['fiscal_year'].unique()
