@@ -13,7 +13,8 @@ def fetch_table(table):
     all_records = []
     page = 0
     while True:
-        res = requests.get(f"{BASE_URL}/{table}?limit=1000&offset={page*1000}", headers=headers)
+        # Added select=* to ensure all columns are retrieved
+        res = requests.get(f"{BASE_URL}/{table}?select=*&limit=1000&offset={page*1000}", headers=headers)
         if res.status_code != 200 or not res.json(): break
         all_records.extend(res.json())
         page += 1
@@ -23,14 +24,15 @@ def fetch_table(table):
 df_sum = fetch_table("state_aid_summary")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
-df_enroll = fetch_table("enrollment_master") # FIXED: Now pointing to master
+df_enroll = fetch_table("enrollment_master")
+
+# COLUMN SAFETY: Normalize columns to lowercase to prevent KeyErrors
+df_enroll.columns = [str(c).lower().strip() for c in df_enroll.columns]
 
 # Filter out summary/aggregate rows to prevent 15M+ FTE error
-valid_lines = [
-    'C1', 'C2', 'D1', 'D2', '01', '02', '03', '04', '05', 
-    '06', '07', '08', '09', '10', '11', '12', '13', '14', 
-    '19', '20', '21', '37', '38'
-]
+valid_lines = ['C1', 'C2', 'D1', 'D2', '01', '02', '03', '04', '05', 
+               '06', '07', '08', '09', '10', '11', '12', '13', '14', 
+               '19', '20', '21', '37', '38']
 df_enroll = df_enroll[df_enroll['grade_level'].isin(valid_lines)].copy()
 
 # Ensure numeric columns are ready for math
@@ -59,7 +61,8 @@ potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual
                   'equalized_valuation', 'local_fair_share', 'district_income', 'resident_enrollment']
 
 for col in potential_cols:
-    df_merged[col] = pd.to_numeric(df_merged[col], errors='coerce').fillna(0)
+    if col in df_merged.columns:
+        df_merged[col] = pd.to_numeric(df_merged[col], errors='coerce').fillna(0)
 
 def add_metrics(df):
     df = df.sort_values(['district_name', 'fiscal_year'])
