@@ -10,18 +10,27 @@ BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
 @st.cache_data(ttl=3600)
 def fetch_table(table):
     res = requests.get(f"{BASE_URL}/{table}?select=*", headers=headers)
-    return pd.DataFrame(res.json()) if res.status_code == 200 else pd.DataFrame()
+    if res.status_code != 200: return pd.DataFrame()
+    df = pd.DataFrame(res.json())
+    # FORCE LOWERCASE IMMEDIATELY
+    df.columns = [str(c).lower().strip() for c in df.columns]
+    return df
 
-# 1. LOAD DATA (Now fetching the efficient view)
+# 1. LOAD DATA
 df_sum = fetch_table("state_aid_summary")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
-df_total_enroll = fetch_table("v_district_fte_summary") # Using the new VIEW
+df_total_enroll = fetch_table("v_district_fte_summary")
+
+# VALIDATION: Check for required keys
+for name, df in [("state_aid", df_sum), ("enrollment_view", df_total_enroll)]:
+    if 'cds_code' not in df.columns or 'fiscal_year' not in df.columns:
+        st.error(f"CRITICAL: {name} is missing keys. Found columns: {df.columns.tolist()}")
+        st.stop()
 
 # Standardize keys
 for df in [df_sum, df_map, df_types, df_total_enroll]:
-    if "cds_code" in df.columns:
-        df["cds_code"] = df["cds_code"].astype(str).str.zfill(6)
+    df["cds_code"] = df["cds_code"].astype(str).str.zfill(6)
 
 # 2. MERGE
 df_merged = df_sum.merge(df_total_enroll, on=['cds_code', 'fiscal_year'], how='left')
