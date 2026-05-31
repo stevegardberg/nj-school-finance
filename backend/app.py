@@ -21,11 +21,11 @@ def fetch_table(table):
     df.columns = [str(c).lower().strip() for c in df.columns]
     return df
 
-# 2. LOAD DATA
+# 2. LOAD & AGGREGATE
 df_sum = fetch_table("state_aid_summary")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
-df_enroll = fetch_table("v_aggregated_enrollment")
+df_enroll = fetch_table("v_aggregated_enrollment") # Optimized Materialized View
 
 # Standardize keys
 for df in [df_sum, df_map, df_types, df_enroll]:
@@ -35,24 +35,30 @@ for df in [df_sum, df_map, df_types, df_enroll]:
         df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
 
 # 3. MERGE
-# We merge enrollment explicitly and ensure 'resident_enrollment' is retained
 df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
-df_merged = df_merged.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
+
+# Merge mapping with collision handling
+df_map_clean = df_map.rename(columns={'county_name': 'county_name_map'})
+df_merged = df_merged.merge(df_map_clean[['cds_code', 'ld_display', 'county_name_map']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
 
+# Resolve county_name collision safely
+if 'county_name' not in df_merged.columns:
+    df_merged['county_name'] = df_merged['county_name_map']
+else:
+    df_merged['county_name'] = df_merged['county_name'].combine_first(df_merged['county_name_map'])
+
+df_merged['county_name'] = df_merged['county_name'].fillna('Unknown')
+df_merged['ld_display'] = df_merged['ld_display'].fillna('Unknown')
+df_merged['district_type'] = df_merged['district_type'].fillna('Unknown')
+
 # 4. CALCULATIONS
-# Convert columns to numeric, ensuring resident_enrollment is captured
 potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
                   'equalized_valuation', 'local_fair_share', 'district_income', 'resident_enrollment']
 
 for col in potential_cols:
     if col in df_merged.columns:
         df_merged[col] = pd.to_numeric(df_merged[col], errors='coerce').fillna(0)
-
-# Fill gaps
-df_merged['county_name'] = df_merged['county_name'].fillna('Unknown')
-df_merged['ld_display'] = df_merged['ld_display'].fillna('Unknown')
-df_merged['district_type'] = df_merged['district_type'].fillna('Unknown')
 
 def add_metrics(df):
     df = df.sort_values(['district_name', 'fiscal_year'])
