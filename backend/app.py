@@ -19,45 +19,48 @@ def fetch_table(table):
         page += 1
     return pd.DataFrame(all_records)
 
-# 2. LOAD
+# 2. LOAD & DYNAMIC NORMALIZATION
 df_aid = fetch_table("state_aid_summary")
 df_meta = fetch_table("district_metadata_mapping")
 df_map = fetch_table("legislative_mapping")
 
-# Normalize district names for bridging
-def norm(val): return str(val).lower().strip()
+def normalize_df(df):
+    """Finds the name column dynamically and creates a norm key."""
+    df.columns = [str(c).lower().strip() for c in df.columns]
+    # Look for any column that contains 'district' and 'name'
+    name_col = next((c for c in df.columns if 'district' in c and 'name' in c), None)
+    if name_col:
+        df['d_name_norm'] = df[name_col].astype(str).str.lower().str.strip()
+    return df
 
-df_aid['d_name_norm'] = df_aid['district_name'].apply(norm)
-df_meta['d_name_norm'] = df_meta['district_name'].apply(norm)
+df_aid = normalize_df(df_aid)
+df_meta = normalize_df(df_meta)
 
-# 3. BRIDGE MERGE (Using Name as the fallback key)
-df_merged = df_aid.merge(
-    df_meta[['d_name_norm', 'district_type']], 
-    on='d_name_norm', 
-    how='left'
-)
-df_merged = df_merged.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
+# 3. BRIDGE MERGE (Only if norm columns exist)
+df_merged = df_aid.copy()
+if 'd_name_norm' in df_meta.columns and 'd_name_norm' in df_merged.columns:
+    df_merged = df_merged.merge(df_meta[['d_name_norm', 'district_type']], on='d_name_norm', how='left')
+else:
+    df_merged['district_type'] = "Not Listed"
 
-# 4. LAYOUT & FORMATTING
-df_merged['district_type'] = df_merged['district_type'].fillna("Not Listed")
-df_merged['ld_display'] = df_merged['ld_display'].fillna("Not Listed")
-
-# UI
+# 4. UI
 st.markdown("### 🏛️ NJ School Finance Intelligence Platform")
 
-# Column Layout Fixes
+# Fill missing columns for UI
+df_merged['district_type'] = df_merged.get('district_type', 'Not Listed').fillna('Not Listed')
+df_merged['ld_display'] = df_merged.get('ld_display', 'Not Listed').fillna('Not Listed')
+
 c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
 sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().tolist()))
 sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].unique().tolist()))
-sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].unique().tolist()))
+sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged.get('county_name', pd.Series(['Unknown']*len(df_merged))).unique().tolist()))
 
-# Filtering
 df_f = df_merged.copy()
 if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
 if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
-if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
 
-sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].unique().tolist()))
+district_list = sorted(df_f.get('district_name', pd.Series(['Unknown']*len(df_f))).unique().tolist())
+sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + district_list)
 
 if sel_district != "Select...":
     st.dataframe(df_merged[df_merged['district_name'] == sel_district], use_container_width=True)
