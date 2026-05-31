@@ -23,7 +23,8 @@ def fetch_table(table):
         if not df.empty:
             df.columns = [str(c).lower().strip() for c in df.columns]
         return df
-    except Exception:
+    except Exception as e:
+        st.error(f"Error fetching {table}: {e}")
         return pd.DataFrame()
 
 # 2. LOAD DATA
@@ -32,15 +33,20 @@ df_enroll = fetch_table("v_aggregated_enrollment")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
 
-# 3. STANDARDIZE KEYS
+# 3. STANDARDIZE KEYS (Force consistent naming)
 for df in [df_sum, df_enroll, df_map, df_types]:
     if "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
     if "fiscal_year" in df.columns:
         df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
 
-# 4. MERGE
+# 4. SAFETY MERGE (Ensuring keys exist before merging)
+if 'cds_code' not in df_enroll.columns or 'fiscal_year' not in df_enroll.columns:
+    st.error(f"Fatal: df_enroll columns are {df_enroll.columns.tolist()}")
+    st.stop()
+
 df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
+
 df_map_clean = df_map.rename(columns={'county_name': 'county_name_map'})
 df_merged = df_merged.merge(df_map_clean[['cds_code', 'ld_display', 'county_name_map']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
@@ -106,9 +112,11 @@ if sel_district != "Select...":
     target_data = df_f[df_f['district_name'] == sel_district]
     st.subheader(f"📍 Financial Ledger: {sel_district}")
     st.dataframe(get_formatted_matrix(target_data), use_container_width=True, hide_index=True)
+    
     ld_val = target_data['ld_display'].iloc[0] if 'ld_display' in target_data.columns else None
     type_val = target_data['district_type'].iloc[0] if 'district_type' in target_data.columns else None
     target_years = target_data['fiscal_year'].unique()
+    
     for name, group_col, val in [("Legislative District", 'ld_display', ld_val), ("District Type", 'district_type', type_val)]:
         if val and val != "Unknown":
             st.markdown("---")
