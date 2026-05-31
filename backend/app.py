@@ -4,7 +4,6 @@ import pandas as pd
 
 st.set_page_config(layout="wide")
 
-# 1. SETUP
 headers = {"apikey": st.secrets["headers"]["apikey"], "Authorization": st.secrets["headers"]["Authorization"]}
 BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
 
@@ -19,22 +18,30 @@ def fetch_table(table):
         page += 1
     return pd.DataFrame(all_records)
 
-# 2. LOAD DATA
+# Load tables
 df_sum = fetch_table("state_aid_summary")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
-df_enroll = fetch_table("v_aggregated_enrollment") # Uses the new DB View
+df_enroll = fetch_table("v_aggregated_enrollment")
 
-# Standardize Keys
+# Force normalization for every table
 for df in [df_sum, df_map, df_types, df_enroll]:
+    df.columns = [str(c).lower().strip() for c in df.columns]
     if "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.zfill(6)
+    if "fiscal_year" in df.columns:
+        df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
 
-# 3. MERGE & CALCULATE
-df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left') \
-                  .merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left') \
-                  .merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
+# Merge with error handling
+try:
+    df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
+    df_merged = df_merged.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
+    df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
+except KeyError as e:
+    st.error(f"Merge failed: {e}. Check that 'cds_code' and 'fiscal_year' exist in all tables.")
+    st.stop()
 
+# Calculations & Formatting
 def add_metrics(df):
     df = df.sort_values(['district_name', 'fiscal_year'])
     df['Pct_Change_Aid'] = df.groupby('district_name')['actual_state_aid'].pct_change().fillna(0)
@@ -46,7 +53,6 @@ def add_metrics(df):
 
 df_merged = add_metrics(df_merged)
 
-# 4. FORMATTING FUNCTION
 def get_formatted_matrix(df):
     col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded', 
                  'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS', 
@@ -64,7 +70,7 @@ def get_formatted_matrix(df):
             df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if '%' not in col and 'per $100' not in col.lower() and 'Enrollment' not in col else (f"{float(x):.2%}" if '%' in col else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"{float(x):,.0f}")))
     return df_out
 
-# 5. UI
+# UI
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
 c1, c2, c3, c4 = st.columns(4)
 sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().tolist()))
@@ -83,7 +89,7 @@ if sel_district != "Select...":
     st.dataframe(get_formatted_matrix(target_data), use_container_width=True, hide_index=True)
     
     for name, group_col, val in [("Legislative District", 'ld_display', target_data['ld_display'].iloc[0]), ("District Type", 'district_type', target_data['district_type'].iloc[0])]:
-        if val:
+        if pd.notnull(val):
             st.markdown("---")
             st.subheader(f"🏛️ {name} Average: {val}")
             peers = df_merged[df_merged[group_col] == val].copy()
