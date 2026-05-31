@@ -30,76 +30,48 @@ df_enroll = fetch_table("v_aggregated_enrollment")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
 
-# 3. STANDARDIZE
+# 3. STANDARDIZE KEYS
 for df in [df_sum, df_enroll, df_map, df_types]:
-    if "cds_code" in df.columns: df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
-    if "fiscal_year" in df.columns: df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
+    if "cds_code" in df.columns:
+        df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
+    if "fiscal_year" in df.columns:
+        df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
 
-# 4. OUTER JOIN (Preserves all years in state_aid_summary)
-df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='outer')
-
-# Merge metadata
-df_map_clean = df_map.rename(columns={'county_name': 'county_name_map'})
-df_merged = df_merged.merge(df_map_clean[['cds_code', 'ld_display', 'county_name_map']], on='cds_code', how='left')
+# 4. ROBUST MERGE
+# Use outer join to ensure districts in df_sum aren't dropped if missing mapping/enrollment data
+df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
+df_merged = df_merged.merge(df_map.rename(columns={'county_name': 'county_name_map'}), on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
 
 df_merged.fillna({'county_name': 'Unknown', 'ld_display': 'Unknown', 'district_type': 'Unknown', 'resident_enrollment': 0}, inplace=True)
 
 # 5. CALCULATIONS
 def add_metrics(df):
-    num_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
-                'equalized_valuation', 'local_fair_share', 'district_income', 'resident_enrollment']
+    num_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy', 'equalized_valuation', 'local_fair_share', 'district_income', 'resident_enrollment']
     for col in num_cols:
         if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    df = df.sort_values(['district_name', 'fiscal_year'])
-    df['Over_Under_Funded'] = df['actual_state_aid'] - df['uncapped_aid']
-    df['Over_Under_LFS'] = df['actual_tax_levy'] - df['local_fair_share']
-    df['Tax_Levy_per_100'] = (df['actual_tax_levy'] / df['equalized_valuation'].replace(0, 1)) * 100
     return df
 
 df_merged = add_metrics(df_merged)
 
-# 6. FORMATTING (Unchanged)
+# 6. FORMATTING
 def get_formatted_matrix(df):
-    col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS', 'equalized_valuation', 'Tax_Levy_per_100', 'district_income', 'resident_enrollment']
+    col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'local_fair_share', 'actual_tax_levy', 'equalized_valuation', 'resident_enrollment']
     available_cols = [c for c in col_order if c in df.columns]
     df_out = df[available_cols].copy()
-    rename_map = {'fiscal_year': 'Fiscal Year', 'adequacy_budget': 'Adequacy Budget', 'uncapped_aid': 'Uncapped Aid', 'actual_state_aid': 'Actual Aid', 'Over_Under_Funded': 'Over/Under Funded', 'local_fair_share': 'Local Fair Share', 'actual_tax_levy': 'Actual Levy', 'Over_Under_LFS': 'Over/Under LFS', 'equalized_valuation': 'Equalized Valuation', 'Tax_Levy_per_100': 'Levy per $100', 'district_income': 'District Income', 'resident_enrollment': 'Resident Enrollment'}
+    rename_map = {'fiscal_year': 'Fiscal Year', 'adequacy_budget': 'Adequacy Budget', 'uncapped_aid': 'Uncapped Aid', 'actual_state_aid': 'Actual Aid', 'local_fair_share': 'Local Fair Share', 'actual_tax_levy': 'Actual Levy', 'equalized_valuation': 'Equalized Valuation', 'resident_enrollment': 'Resident Enrollment'}
     df_out = df_out.rename(columns=rename_map)
     for col in df_out.columns:
         if col != 'Fiscal Year':
-            df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if 'Enrollment' not in col and 'per $100' not in col.lower() else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"{float(x):,.0f}"))
+            df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if 'Enrollment' not in col else f"{float(x):,.0f}")
     return df_out
 
 # 7. UI
-st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
-c1, c2, c3, c4 = st.columns(4)
-sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().tolist()))
-sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].dropna().unique().tolist()))
-sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].dropna().unique().tolist()))
-
-df_f = df_merged.copy()
-if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
-if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
-if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
-
-# Debugging Boonton:
-st.sidebar.write("Debug: Is Boonton in filtered data?", "Boonton" in df_f['district_name'].unique())
-
-sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().tolist()))
+st.markdown("### 🏛️ NJ School Finance Platform")
+district_list = sorted(df_merged['district_name'].dropna().unique().tolist())
+sel_district = st.selectbox("Select District:", ["Select..."] + district_list)
 
 if sel_district != "Select...":
-    target_data = df_f[df_f['district_name'] == sel_district]
-    st.subheader(f"📍 Financial Ledger: {sel_district}")
-    st.dataframe(get_formatted_matrix(target_data), use_container_width=True, hide_index=True)
-    
-    ld_val = target_data['ld_display'].iloc[0] if 'ld_display' in target_data.columns else None
-    type_val = target_data['district_type'].iloc[0] if 'district_type' in target_data.columns else None
-    
-    for name, group_col, val in [("Legislative District", 'ld_display', ld_val), ("District Type", 'district_type', type_val)]:
-        if val and val != "Unknown":
-            st.markdown("---")
-            st.subheader(f"🏛️ {name} Average: {val}")
-            peers = df_merged[df_merged[group_col] == val].copy()
-            avg = add_metrics(peers).groupby('fiscal_year').mean(numeric_only=True).reset_index()
-            st.dataframe(get_formatted_matrix(avg), use_container_width=True, hide_index=True)
+    target_data = df_merged[df_merged['district_name'] == sel_district].sort_values('fiscal_year')
+    st.subheader(f"📍 Ledger: {sel_district}")
+    st.dataframe(get_formatted_matrix(target_data), use_container_width=True)
