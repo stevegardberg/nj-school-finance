@@ -30,13 +30,17 @@ df_enroll = fetch_table("v_aggregated_enrollment")
 df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
 
 # 3. DIAGNOSTIC PRINT
-st.write(f"Total rows in merged dataframe: {len(df_merged)}")
-st.write("First 5 rows of data:")
+st.write("Available columns in merged dataframe:", df_merged.columns.tolist())
 st.dataframe(df_merged.head())
 
-# 4. Fallback Selection
-if not df_merged.empty and 'district_name' in df_merged.columns:
-    districts = sorted(df_merged['district_name'].dropna().unique().tolist())
+# 4. Corrected Selection Logic
+# If 'district_name' is missing, check if it's 'name' or 'districtname'
+col_options = ['district_name', 'name', 'districtname']
+actual_col = next((c for c in col_options if c in df_merged.columns), None)
+
+if actual_col:
+    st.write(f"Using '{actual_col}' as the district identifier.")
+    districts = sorted(df_merged[actual_col].dropna().unique().tolist())
     sel_district = st.selectbox("Select District:", ["Select..."] + districts)
 else:
-    st.error("No data found or 'district_name' column missing.")
+    st.error("Critical Error: Could not find a district name column in the merged data.")
