@@ -10,11 +10,14 @@ BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
 
 @st.cache_data(ttl=3600)
 def fetch_table(table):
-    res = requests.get(f"{BASE_URL}/{table}?select=*", headers=headers)
-    if res.status_code != 200: return pd.DataFrame()
-    df = pd.DataFrame(res.json())
-    df.columns = [str(c).lower().strip() for c in df.columns]
-    return df
+    try:
+        res = requests.get(f"{BASE_URL}/{table}?select=*", headers=headers)
+        if res.status_code == 200:
+            df = pd.DataFrame(res.json())
+            df.columns = [str(c).lower().strip() for c in df.columns]
+            return df
+    except: pass
+    return pd.DataFrame()
 
 # 2. LOAD DATA
 df_aid = fetch_table("state_aid_summary")
@@ -22,13 +25,7 @@ df_enroll = fetch_table("v_district_fte_summary")
 df_map = fetch_table("legislative_mapping")
 df_meta = fetch_table("district_metadata_mapping")
 
-# 3. DEBUG: SHOW RAW BOONTON DATA
-# This will display on your screen exactly how the data looks coming from the DB
-st.subheader("Database Diagnostic (Raw Data Check)")
-boonton_raw = df_aid[df_aid['district_name'].str.contains("Boonton", na=False, case=False)]
-st.write("Boonton rows found in state_aid_summary:", boonton_raw[['district_name', 'cds_code']])
-
-# 4. CLEANING
+# 3. CLEANING
 def clean(df):
     if "cds_code" in df.columns: 
         df["cds_code"] = df["cds_code"].astype(str).str.split('.').str[0].str.strip().str.zfill(6)
@@ -36,12 +33,29 @@ def clean(df):
         df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
     return df
 
-df_aid, df_enroll, df_map, df_meta = map(clean, [df_aid, df_enroll, df_map, df_meta])
+df_aid = clean(df_aid)
+df_enroll = clean(df_enroll)
+df_map = clean(df_map)
+df_meta = clean(df_meta)
 
-# 5. MERGE
-df_merged = df_aid.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='outer')
-df_merged = df_merged.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
-df_merged = df_merged.merge(df_meta[['cds_code', 'district_type']], on='cds_code', how='left')
+# 4. SAFE MERGE (Handles missing tables/columns gracefully)
+df_merged = df_aid.copy()
+
+# Merge Enrollment
+if not df_enroll.empty and 'fiscal_year' in df_enroll.columns:
+    df_merged = df_merged.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='outer')
+
+# Merge Mapping (Only if valid)
+if not df_map.empty and 'ld_display' in df_map.columns:
+    df_merged = df_merged.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
+else:
+    df_merged['ld_display'] = "Not Listed"
+
+# Merge Metadata (Only if valid)
+if not df_meta.empty and 'district_type' in df_meta.columns:
+    df_merged = df_merged.merge(df_meta[['cds_code', 'district_type']], on='cds_code', how='left')
+else:
+    df_merged['district_type'] = "Not Listed"
 
 # FILL GAPS
 df_merged['district_name'] = df_merged['district_name'].fillna("Unknown")
@@ -49,13 +63,17 @@ df_merged['ld_display'] = df_merged['ld_display'].fillna("Not Listed")
 df_merged['district_type'] = df_merged['district_type'].fillna("Not Listed")
 df_merged['county_name'] = df_merged['county_name'].fillna("Unknown")
 
-# 6. UI FILTERS
+# 5. UI
 st.markdown("### 🏛️ NJ School Finance Platform")
 
+# Debugging
+st.sidebar.write(f"Raw Aid Rows: {len(df_aid)}")
+st.sidebar.write(f"Boonton Raw Check: {len(df_aid[df_aid['district_name'].str.contains('Boonton', na=False, case=False)])}")
+
 c1, c2, c3, c4 = st.columns(4)
-sel_ld = c1.selectbox("Legislative:", ["All"] + sorted(df_merged['ld_display'].astype(str).unique().tolist()))
-sel_type = c2.selectbox("District Type:", ["All"] + sorted(df_merged['district_type'].astype(str).unique().tolist()))
-sel_county = c3.selectbox("County:", ["All"] + sorted(df_merged['county_name'].astype(str).unique().tolist()))
+sel_ld = c1.selectbox("Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().astype(str).tolist()))
+sel_type = c2.selectbox("District Type:", ["All"] + sorted(df_merged['district_type'].unique().astype(str).tolist()))
+sel_county = c3.selectbox("County:", ["All"] + sorted(df_merged['county_name'].unique().astype(str).tolist()))
 
 # Filter
 df_f = df_merged.copy()
@@ -63,8 +81,7 @@ if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
 if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
 if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
 
-# FORCE LIST TO BE ALL DISTRICTS REGARDLESS OF FILTERS (To bypass UI hiding)
-district_list = sorted(df_merged['district_name'].astype(str).unique().tolist())
+district_list = sorted(df_f['district_name'].unique().astype(str).tolist())
 sel_district = c4.selectbox("District:", ["Select..."] + district_list)
 
 if sel_district != "Select...":
