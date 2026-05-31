@@ -30,43 +30,31 @@ df_enroll = fetch_table("v_aggregated_enrollment")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
 
-# 3. STANDARDIZE KEYS
+# 3. STANDARDIZE KEYS (CDS Code is the source of truth)
 for df in [df_sum, df_enroll, df_map, df_types]:
     if "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
     if "fiscal_year" in df.columns:
         df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
 
-# 4. ROBUST MERGE
-# Start with df_sum as the base to keep ALL district records
-df_merged = df_sum.copy()
-df_merged = df_merged.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
-df_merged = df_merged.merge(df_map.rename(columns={'county_name': 'county_name_map'}), on='cds_code', how='left')
+# 4. MERGE ON CDS CODE ONLY
+df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
+df_merged = df_merged.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
 
-# CONSOLIDATE DISTRICT NAMES
-# If x and y exist, x is usually the master from df_sum
-df_merged['district_name'] = df_merged['district_name_x'].fillna(df_merged.get('district_name_y', 'Unknown'))
-
-# 5. UI DEBUGGING
-# Remove this block later, but it will tell us if Boonton is actually in the final merged data
-if st.sidebar.checkbox("Verify Boonton existence"):
-    boonton_check = df_merged[df_merged['district_name'].str.contains("Boonton", na=False)]
-    st.sidebar.write("Boonton records found:", len(boonton_check))
-    st.sidebar.write(boonton_check[['district_name', 'cds_code']].drop_duplicates())
-
-# 6. CALCULATIONS
-num_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy', 'equalized_valuation', 'local_fair_share', 'district_income', 'resident_enrollment']
-for col in num_cols:
-    if col in df_merged.columns: df_merged[col] = pd.to_numeric(df_merged[col], errors='coerce').fillna(0)
-
-# 7. UI
+# 5. UI - CDS CODE ANCHORED SELECTION
 st.markdown("### 🏛️ NJ School Finance Platform")
-district_list = sorted(df_merged['district_name'].dropna().unique().tolist())
-sel_district = st.selectbox("Select District:", ["Select..."] + district_list)
 
-if sel_district != "Select...":
-    target_data = df_merged[df_merged['district_name'] == sel_district].sort_values('fiscal_year')
-    st.subheader(f"📍 Ledger: {sel_district}")
-    # Display the ledger
+# Create a clean display label while keeping CDS Code as the unique selector
+df_merged['display_label'] = df_merged['district_name'] + " (" + df_merged['cds_code'] + ")"
+unique_districts = df_merged[['display_label', 'cds_code']].drop_duplicates().dropna().sort_values('display_label')
+
+sel_option = st.selectbox("Select District:", ["Select..."] + unique_districts['display_label'].tolist())
+
+if sel_option != "Select...":
+    # Pull the CDS code back out of the label to filter the data
+    target_cds = unique_districts[unique_districts['display_label'] == sel_option]['cds_code'].values[0]
+    target_data = df_merged[df_merged['cds_code'] == target_cds].sort_values('fiscal_year')
+    
+    st.subheader(f"📍 Financial Ledger: {sel_option}")
     st.dataframe(target_data, use_container_width=True)
