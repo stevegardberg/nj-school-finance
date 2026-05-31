@@ -16,7 +16,7 @@ def fetch_table(table):
    all_records = []
    page = 0
    while True:
-       res = requests.get(f"{BASE_URL}/{table}?select=*&limit=1000&offset={page*1000}", headers=headers)
+       res = requests.get(f"{BASE_URL}/{table}?limit=1000&offset={page*1000}", headers=headers)
        if res.status_code != 200 or not res.json(): break
        all_records.extend(res.json())
        page += 1
@@ -30,36 +30,9 @@ df_types = fetch_table("vw_district_cohorts")
 df_enroll = fetch_table("enrollment_master")
 
 
-# DEBUG: Force column inspection
-st.write("DEBUG - Columns found in enrollment_master:", df_enroll.columns.tolist())
-
-
-# COLUMN SAFETY: Normalize to lowercase and strip whitespace
-df_enroll.columns = [str(c).lower().strip() for c in df_enroll.columns]
-
-
-# Check if 'grade_level' actually exists
-if 'grade_level' not in df_enroll.columns:
-   st.error(f"CRITICAL: 'grade_level' column not found! Found: {df_enroll.columns.tolist()}")
-   st.stop()
-
-
-# Filter out summary/aggregate rows
-valid_lines = ['C1', 'C2', 'D1', 'D2', '01', '02', '03', '04', '05',
-              '06', '07', '08', '09', '10', '11', '12', '13', '14',
-              '19', '20', '21', '37', '38']
-df_enroll = df_enroll[df_enroll['grade_level'].isin(valid_lines)].copy()
-
-
-# Ensure numeric columns are ready for math
-for col in ['onroll_ft', 'onroll_st']:
-   df_enroll[col] = pd.to_numeric(df_enroll[col], errors='coerce').fillna(0)
-
-
-# Calculate FTE and Aggregate
-df_enroll['fte'] = df_enroll['onroll_ft'] + (df_enroll['onroll_st'] * 0.5)
-df_total_enroll = df_enroll.groupby(['cds_code', 'fiscal_year'])['fte'].sum().reset_index()
-df_total_enroll.rename(columns={'fte': 'resident_enrollment'}, inplace=True)
+# Total Enrollment by District/Year
+df_total_enroll = df_enroll.groupby(['cds_code', 'fiscal_year'])['student_count'].sum().reset_index()
+df_total_enroll.rename(columns={'student_count': 'resident_enrollment'}, inplace=True)
 
 
 # Standardize keys
@@ -69,12 +42,16 @@ for df in [df_sum, df_map, df_types, df_total_enroll]:
 
 
 # 3. MERGE
+# We pull county_name directly from df_sum as verified by your schema
 df_merged = df_sum.merge(df_total_enroll, on=['cds_code', 'fiscal_year'], how='left')
 df_merged = df_merged.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
 
 
-df_merged['county_name'] = df_merged.get('county_name', 'Unknown').fillna('Unknown')
+# Ensure county_name exists
+if 'county_name' not in df_merged.columns:
+   df_merged['county_name'] = 'Unknown'
+df_merged['county_name'] = df_merged['county_name'].fillna('Unknown')
 
 
 # 4. CALCULATIONS
@@ -83,8 +60,7 @@ potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual
 
 
 for col in potential_cols:
-   if col in df_merged.columns:
-       df_merged[col] = pd.to_numeric(df_merged[col], errors='coerce').fillna(0)
+   df_merged[col] = pd.to_numeric(df_merged[col], errors='coerce').fillna(0)
 
 
 def add_metrics(df):
