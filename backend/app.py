@@ -5,27 +5,38 @@ import pandas as pd
 st.set_page_config(layout="wide")
 
 # 1. SETUP
-headers = {
-    "apikey": st.secrets["headers"]["apikey"], 
-    "Authorization": st.secrets["headers"]["Authorization"],
-    "Prefer": "return=representation"
-}
+# We use both Headers and URL params for maximum compatibility with Supabase
+API_KEY = st.secrets["headers"]["apikey"]
+AUTH_TOKEN = st.secrets["headers"]["Authorization"]
 BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
 
 @st.cache_data(ttl=3600)
 def fetch_table(table):
     try:
-        res = requests.get(f"{BASE_URL}/{table}?limit=10000", headers=headers)
+        # Pass API key in both header and URL to ensure authentication
+        url = f"{BASE_URL}/{table}?limit=10000&apikey={API_KEY}"
+        headers = {
+            "apikey": API_KEY,
+            "Authorization": AUTH_TOKEN,
+            "Prefer": "return=representation"
+        }
+        
+        res = requests.get(url, headers=headers)
+        
         if res.status_code != 200:
+            st.error(f"API Error {res.status_code} for {table}: {res.text}")
             return pd.DataFrame()
+        
         data = res.json()
         if not data: return pd.DataFrame()
         if isinstance(data, dict): data = [data]
         df = pd.DataFrame(data)
-        # Force column names to lowercase and strip whitespace
+        
+        # Ensure column names are clean
         df.columns = [str(c).lower().strip() for c in df.columns]
         return df
-    except Exception:
+    except Exception as e:
+        st.error(f"Connection error: {e}")
         return pd.DataFrame()
 
 # 2. LOAD DATA
@@ -34,20 +45,19 @@ df_enroll = fetch_table("v_aggregated_enrollment")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
 
-# 3. VERIFY AND STANDARDIZE KEYS
-for name, df in [("sum", df_sum), ("enroll", df_enroll), ("map", df_map), ("types", df_types)]:
+# 3. STANDARDIZE KEYS
+for df in [df_sum, df_enroll, df_map, df_types]:
     if "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
     if "fiscal_year" in df.columns:
         df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
 
-# 4. SAFETY CHECK: Debug column presence before merge
+# 4. DEFENSIVE MERGE
 required_keys = ['cds_code', 'fiscal_year']
 if not all(key in df_enroll.columns for key in required_keys):
-    st.error(f"FATAL ERROR: df_enroll is missing required keys. Found columns: {df_enroll.columns.tolist()}")
+    st.error(f"FATAL: df_enroll is missing required keys. Found columns: {df_enroll.columns.tolist()}")
     st.stop()
 
-# 5. MERGE
 df_merged = df_sum.merge(df_enroll, on=required_keys, how='left')
 
 # Merge mapping and cohorts
@@ -63,7 +73,7 @@ else:
 
 df_merged.fillna({'county_name': 'Unknown', 'ld_display': 'Unknown', 'district_type': 'Unknown', 'resident_enrollment': 0}, inplace=True)
 
-# 6. CALCULATIONS
+# 5. CALCULATIONS
 def add_metrics(df):
     num_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
                 'equalized_valuation', 'local_fair_share', 'district_income', 'resident_enrollment']
@@ -81,7 +91,7 @@ def add_metrics(df):
 
 df_merged = add_metrics(df_merged)
 
-# 7. FORMATTING
+# 6. FORMATTING
 def get_formatted_matrix(df):
     col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded',
                  'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS',
@@ -99,7 +109,7 @@ def get_formatted_matrix(df):
             df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if '%' not in col and 'per $100' not in col.lower() and 'Enrollment' not in col else (f"{float(x):.2%}" if '%' in col else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"{float(x):,.0f}")))
     return df_out
 
-# 8. UI
+# 7. UI
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
 c1, c2, c3, c4 = st.columns(4)
 sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().tolist()))
