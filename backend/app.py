@@ -50,18 +50,22 @@ for col in potential_cols:
 # 4. UI FILTERS
 st.markdown("### 🏛️ NJ School Finance Platform")
 
-c1, c2, c3, c4 = st.columns(4)
-sel_ld = c1.selectbox("Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().tolist()))
-sel_type = c2.selectbox("District Type:", ["All"] + sorted(df_merged['district_type'].unique().tolist()))
-sel_county = c3.selectbox("County:", ["All"] + sorted(df_merged['county_name'].unique().tolist()))
+# Debugging visibility: Show this if Boonton data exists in the merged result
+if not df_merged[df_merged['district_name'].str.contains("Boonton", na=False)].empty:
+    st.info("Boonton Town/Twp data loaded and available.")
 
-# Filter logic with explicit string casting to prevent TypeError
+c1, c2, c3, c4 = st.columns(4)
+sel_ld = c1.selectbox("Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().astype(str).tolist()))
+sel_type = c2.selectbox("District Type:", ["All"] + sorted(df_merged['district_type'].unique().astype(str).tolist()))
+sel_county = c3.selectbox("County:", ["All"] + sorted(df_merged['county_name'].unique().astype(str).tolist()))
+
+# Filter logic with explicit string casting
 df_f = df_merged.copy()
 if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
 if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
 if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
 
-# Ensure district_name is treated as string for the dropdown
+# Ensure district_name is string for the dropdown to avoid TypeError
 district_list = sorted(df_f['district_name'].astype(str).unique().tolist())
 sel_district = c4.selectbox("District:", ["Select..."] + district_list)
 
