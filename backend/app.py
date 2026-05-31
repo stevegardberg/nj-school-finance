@@ -12,32 +12,17 @@ BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
 @st.cache_data(ttl=3600)
 def fetch_table(table):
     try:
-        # Pass API key in header to ensure authentication
         url = f"{BASE_URL}/{table}?apikey={API_KEY}"
-        headers = {
-            "apikey": API_KEY,
-            "Authorization": AUTH_TOKEN,
-            "Prefer": "return=representation"
-        }
-        
-        # 60s timeout to allow the DB to finish the View aggregation
+        headers = {"apikey": API_KEY, "Authorization": AUTH_TOKEN, "Prefer": "return=representation"}
         res = requests.get(url, headers=headers, timeout=60)
-        
-        if res.status_code != 200:
-            st.error(f"API Error {res.status_code} for {table}: {res.text}")
-            return pd.DataFrame()
-        
+        if res.status_code != 200: return pd.DataFrame()
         data = res.json()
         if not data: return pd.DataFrame()
         if isinstance(data, dict): data = [data]
         df = pd.DataFrame(data)
-        
-        # Ensure column names are clean
         df.columns = [str(c).lower().strip() for c in df.columns]
         return df
-    except Exception as e:
-        st.error(f"Connection failure: {e}")
-        return pd.DataFrame()
+    except: return pd.DataFrame()
 
 # 2. LOAD DATA
 df_sum = fetch_table("state_aid_summary")
@@ -45,31 +30,18 @@ df_enroll = fetch_table("v_aggregated_enrollment")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
 
-# 3. STANDARDIZE KEYS
+# 3. STANDARDIZE
 for df in [df_sum, df_enroll, df_map, df_types]:
-    if "cds_code" in df.columns:
-        df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
-    if "fiscal_year" in df.columns:
-        df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
+    if "cds_code" in df.columns: df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
+    if "fiscal_year" in df.columns: df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
 
-# 4. DEFENSIVE MERGE
-required_keys = ['cds_code', 'fiscal_year']
-if df_enroll.empty:
-    st.error("Enrollment data is empty. Ensure the index is created and the API is reachable.")
-    st.stop()
+# 4. OUTER JOIN (Preserves all years in state_aid_summary)
+df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='outer')
 
-df_merged = df_sum.merge(df_enroll, on=required_keys, how='left')
-
-# Merge mapping and cohorts
+# Merge metadata
 df_map_clean = df_map.rename(columns={'county_name': 'county_name_map'})
 df_merged = df_merged.merge(df_map_clean[['cds_code', 'ld_display', 'county_name_map']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
-
-# Resolve county_name collision safely
-if 'county_name' not in df_merged.columns:
-    df_merged['county_name'] = df_merged.get('county_name_map', 'Unknown')
-else:
-    df_merged['county_name'] = df_merged['county_name'].combine_first(df_merged.get('county_name_map', pd.Series(dtype=str)))
 
 df_merged.fillna({'county_name': 'Unknown', 'ld_display': 'Unknown', 'district_type': 'Unknown', 'resident_enrollment': 0}, inplace=True)
 
@@ -78,12 +50,8 @@ def add_metrics(df):
     num_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
                 'equalized_valuation', 'local_fair_share', 'district_income', 'resident_enrollment']
     for col in num_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    
+        if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     df = df.sort_values(['district_name', 'fiscal_year'])
-    df['Pct_Change_Aid'] = df.groupby('district_name')['actual_state_aid'].pct_change().fillna(0)
-    df['Pct_Change_Levy'] = df.groupby('district_name')['actual_tax_levy'].pct_change().fillna(0)
     df['Over_Under_Funded'] = df['actual_state_aid'] - df['uncapped_aid']
     df['Over_Under_LFS'] = df['actual_tax_levy'] - df['local_fair_share']
     df['Tax_Levy_per_100'] = (df['actual_tax_levy'] / df['equalized_valuation'].replace(0, 1)) * 100
@@ -91,22 +59,16 @@ def add_metrics(df):
 
 df_merged = add_metrics(df_merged)
 
-# 6. FORMATTING
+# 6. FORMATTING (Unchanged)
 def get_formatted_matrix(df):
-    col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded',
-                 'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS',
-                 'Pct_Change_Levy', 'equalized_valuation', 'Tax_Levy_per_100', 'district_income', 'resident_enrollment']
+    col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS', 'equalized_valuation', 'Tax_Levy_per_100', 'district_income', 'resident_enrollment']
     available_cols = [c for c in col_order if c in df.columns]
     df_out = df[available_cols].copy()
-    rename_map = {'fiscal_year': 'Fiscal Year', 'adequacy_budget': 'Adequacy Budget', 'uncapped_aid': 'Uncapped Aid',
-                  'actual_state_aid': 'Actual Aid', 'Over_Under_Funded': 'Over/Under Funded', 'Pct_Change_Aid': '% Change Actual Aid',
-                  'local_fair_share': 'Local Fair Share', 'actual_tax_levy': 'Actual Levy', 'Over_Under_LFS': 'Over/Under LFS',
-                  'Pct_Change_Levy': '% Change Actual Levy', 'equalized_valuation': 'Equalized Valuation',
-                  'Tax_Levy_per_100': 'Levy per $100', 'district_income': 'District Income', 'resident_enrollment': 'Resident Enrollment'}
+    rename_map = {'fiscal_year': 'Fiscal Year', 'adequacy_budget': 'Adequacy Budget', 'uncapped_aid': 'Uncapped Aid', 'actual_state_aid': 'Actual Aid', 'Over_Under_Funded': 'Over/Under Funded', 'local_fair_share': 'Local Fair Share', 'actual_tax_levy': 'Actual Levy', 'Over_Under_LFS': 'Over/Under LFS', 'equalized_valuation': 'Equalized Valuation', 'Tax_Levy_per_100': 'Levy per $100', 'district_income': 'District Income', 'resident_enrollment': 'Resident Enrollment'}
     df_out = df_out.rename(columns=rename_map)
     for col in df_out.columns:
         if col != 'Fiscal Year':
-            df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if '%' not in col and 'per $100' not in col.lower() and 'Enrollment' not in col else (f"{float(x):.2%}" if '%' in col else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"{float(x):,.0f}")))
+            df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if 'Enrollment' not in col and 'per $100' not in col.lower() else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"{float(x):,.0f}"))
     return df_out
 
 # 7. UI
@@ -121,6 +83,9 @@ if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
 if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
 if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
 
+# Debugging Boonton:
+st.sidebar.write("Debug: Is Boonton in filtered data?", "Boonton" in df_f['district_name'].unique())
+
 sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().tolist()))
 
 if sel_district != "Select...":
@@ -130,7 +95,6 @@ if sel_district != "Select...":
     
     ld_val = target_data['ld_display'].iloc[0] if 'ld_display' in target_data.columns else None
     type_val = target_data['district_type'].iloc[0] if 'district_type' in target_data.columns else None
-    target_years = target_data['fiscal_year'].unique()
     
     for name, group_col, val in [("Legislative District", 'ld_display', ld_val), ("District Type", 'district_type', type_val)]:
         if val and val != "Unknown":
@@ -138,5 +102,4 @@ if sel_district != "Select...":
             st.subheader(f"🏛️ {name} Average: {val}")
             peers = df_merged[df_merged[group_col] == val].copy()
             avg = add_metrics(peers).groupby('fiscal_year').mean(numeric_only=True).reset_index()
-            avg = avg[avg['fiscal_year'].isin(target_years)]
             st.dataframe(get_formatted_matrix(avg), use_container_width=True, hide_index=True)
