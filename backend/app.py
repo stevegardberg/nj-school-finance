@@ -12,14 +12,16 @@ BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
 @st.cache_data(ttl=3600)
 def fetch_table(table):
     try:
+        # Pass API key in header to ensure authentication
         url = f"{BASE_URL}/{table}?apikey={API_KEY}"
         headers = {
             "apikey": API_KEY,
             "Authorization": AUTH_TOKEN,
             "Prefer": "return=representation"
         }
-        # Increased timeout to 45s to allow the View to compute after indexing
-        res = requests.get(url, headers=headers, timeout=45)
+        
+        # 60s timeout to allow the DB to finish the View aggregation
+        res = requests.get(url, headers=headers, timeout=60)
         
         if res.status_code != 200:
             st.error(f"API Error {res.status_code} for {table}: {res.text}")
@@ -29,6 +31,8 @@ def fetch_table(table):
         if not data: return pd.DataFrame()
         if isinstance(data, dict): data = [data]
         df = pd.DataFrame(data)
+        
+        # Ensure column names are clean
         df.columns = [str(c).lower().strip() for c in df.columns]
         return df
     except Exception as e:
