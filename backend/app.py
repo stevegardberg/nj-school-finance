@@ -4,6 +4,7 @@ import pandas as pd
 
 st.set_page_config(layout="wide")
 
+# 1. SETUP
 API_KEY = st.secrets["headers"]["apikey"]
 AUTH_TOKEN = st.secrets["headers"]["Authorization"]
 BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
@@ -24,13 +25,14 @@ def fetch_all_data(table):
         if len(batch) < size: break
         page += 1
     df = pd.DataFrame(data)
-    df.columns = [str(c).lower().strip() for c in df.columns]
+    if not df.empty:
+        df.columns = [str(c).lower().strip() for c in df.columns]
     return df
 
 # 2. LOAD DATA
 df_sum = fetch_all_data("state_aid_summary")
 df_enroll = fetch_all_data("v_aggregated_enrollment")
-df_map = fetch_all_table_data("legislative_mapping") # Fixed function call
+df_map = fetch_all_data("legislative_mapping") # Fixed function call
 df_types = fetch_all_data("vw_district_cohorts")
 
 # 3. STANDARDIZE KEYS
@@ -41,9 +43,10 @@ for df in [df_sum, df_enroll, df_map, df_types]:
 # 4. DEBUGGING
 st.sidebar.write("### Data Integrity Check")
 boonton_codes = ['270450', '270460']
-for name, df in [("Summary", df_sum), ("Enrollment", df_enroll)]:
-    count = len(df[df['cds_code'].isin(boonton_codes)])
-    st.sidebar.write(f"{name} has {count} Boonton records.")
+for name, df in [("Summary", df_sum), ("Enrollment", df_enroll), ("Mapping", df_map)]:
+    if "cds_code" in df.columns:
+        count = len(df[df['cds_code'].isin(boonton_codes)])
+        st.sidebar.write(f"{name} has {count} Boonton records.")
 
 # 5. MERGE
 df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
