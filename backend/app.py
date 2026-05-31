@@ -5,7 +5,6 @@ import pandas as pd
 st.set_page_config(layout="wide")
 
 # 1. SETUP
-# We use both Headers and URL params for maximum compatibility with Supabase
 API_KEY = st.secrets["headers"]["apikey"]
 AUTH_TOKEN = st.secrets["headers"]["Authorization"]
 BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
@@ -13,15 +12,16 @@ BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
 @st.cache_data(ttl=3600)
 def fetch_table(table):
     try:
-        # Pass API key in both header and URL to ensure authentication
-        url = f"{BASE_URL}/{table}?limit=10000&apikey={API_KEY}"
+        # Requesting only the View, not the raw 3M table
+        url = f"{BASE_URL}/{table}?apikey={API_KEY}"
         headers = {
             "apikey": API_KEY,
             "Authorization": AUTH_TOKEN,
             "Prefer": "return=representation"
         }
         
-        res = requests.get(url, headers=headers)
+        # 30s timeout to allow the DB to finish the View aggregation
+        res = requests.get(url, headers=headers, timeout=30)
         
         if res.status_code != 200:
             st.error(f"API Error {res.status_code} for {table}: {res.text}")
@@ -32,11 +32,11 @@ def fetch_table(table):
         if isinstance(data, dict): data = [data]
         df = pd.DataFrame(data)
         
-        # Ensure column names are clean
+        # Force lower case to ensure column matching
         df.columns = [str(c).lower().strip() for c in df.columns]
         return df
     except Exception as e:
-        st.error(f"Connection error: {e}")
+        st.error(f"Connection failure: {e}")
         return pd.DataFrame()
 
 # 2. LOAD DATA
