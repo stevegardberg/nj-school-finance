@@ -21,63 +21,37 @@ def fetch_table(table):
 
 # 2. LOAD
 df_aid = fetch_table("state_aid_summary")
-df_map = fetch_table("legislative_mapping")
 df_meta = fetch_table("district_metadata_mapping")
-df_enroll = fetch_table("v_district_fte_summary")
+df_map = fetch_table("legislative_mapping")
 
-# 3. STANDARDIZE (Essential: Ensure codes match format)
-def standardize_cds(val):
-    return str(val).split('.')[0].strip().zfill(6)
+# Normalize district names for bridging
+def norm(val): return str(val).lower().strip()
 
-for df in [df_aid, df_map, df_meta, df_enroll]:
-    if not df.empty:
-        df.columns = [str(c).lower().strip() for c in df.columns]
-        if "cds_code" in df.columns:
-            df["cds_code"] = df["cds_code"].apply(standardize_cds)
-        if "fiscal_year" in df.columns:
-            df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
+df_aid['d_name_norm'] = df_aid['district_name'].apply(norm)
+df_meta['d_name_norm'] = df_meta['district_name'].apply(norm)
 
-# 4. CROSS-TABLE VALIDATION (The "Why is my data missing" check)
-if not df_aid.empty and not df_meta.empty:
-    aid_codes = set(df_aid['cds_code'].unique())
-    meta_codes = set(df_meta['cds_code'].unique())
-    intersection = aid_codes.intersection(meta_codes)
-    
-    st.sidebar.subheader("Data Validation")
-    st.sidebar.write(f"Matching CDS Codes found: {len(intersection)}")
-    if len(intersection) == 0:
-        st.sidebar.error("No matches found between Aid and Meta tables.")
-        st.sidebar.write("Aid Sample:", sorted(list(aid_codes))[:3])
-        st.sidebar.write("Meta Sample:", sorted(list(meta_codes))[:3])
+# 3. BRIDGE MERGE (Using Name as the fallback key)
+df_merged = df_aid.merge(
+    df_meta[['d_name_norm', 'district_type']], 
+    on='d_name_norm', 
+    how='left'
+)
+df_merged = df_merged.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
 
-# 5. MERGE
-df_merged = df_aid.copy()
-if not df_enroll.empty:
-    df_merged = df_merged.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
-if not df_map.empty:
-    df_merged = df_merged.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
-if not df_meta.empty:
-    df_merged = df_merged.merge(df_meta[['cds_code', 'district_type']], on='cds_code', how='left')
+# 4. LAYOUT & FORMATTING
+df_merged['district_type'] = df_merged['district_type'].fillna("Not Listed")
+df_merged['ld_display'] = df_merged['ld_display'].fillna("Not Listed")
 
-# 6. FORCE COLUMN CREATION
-for col in ['district_name', 'ld_display', 'district_type', 'county_name']:
-    if col not in df_merged.columns:
-        df_merged[col] = "Not Listed"
-    else:
-        df_merged[col] = df_merged[col].astype(str).str.strip().replace("nan", "Not Listed").fillna("Not Listed")
-
-# 7. UI
+# UI
 st.markdown("### 🏛️ NJ School Finance Intelligence Platform")
 
-c1, c2, c3, c4 = st.columns(4)
-
-# Get unique types excluding "Not Listed"
-unique_types = sorted([t for t in df_merged['district_type'].unique() if t != "Not Listed"])
-
+# Column Layout Fixes
+c1, c2, c3, c4 = st.columns([1, 1, 1, 2])
 sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().tolist()))
-sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + unique_types)
+sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].unique().tolist()))
 sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].unique().tolist()))
 
+# Filtering
 df_f = df_merged.copy()
 if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
 if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
