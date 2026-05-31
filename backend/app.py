@@ -13,7 +13,6 @@ def fetch_table(table):
     all_records = []
     page = 0
     while True:
-        # Pagination: Fetches all data 1000 rows at a time
         res = requests.get(f"{BASE_URL}/{table}?select=*&limit=1000&offset={page*1000}", headers=headers)
         if res.status_code != 200 or not res.json(): break
         all_records.extend(res.json())
@@ -26,6 +25,7 @@ df_map = fetch_table("legislative_mapping")
 df_meta = fetch_table("district_metadata_mapping")
 df_enroll = fetch_table("v_district_fte_summary")
 
+# Apply rigorous cleaning to CDS codes
 for df in [df_aid, df_map, df_meta, df_enroll]:
     if not df.empty:
         df.columns = [str(c).lower().strip() for c in df.columns]
@@ -40,22 +40,29 @@ if not df_enroll.empty:
     df_merged = df_merged.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
 if not df_map.empty:
     df_merged = df_merged.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
+# Force merge using string conversion just in case
 if not df_meta.empty:
     df_merged = df_merged.merge(df_meta[['cds_code', 'district_type']], on='cds_code', how='left')
 
-# FORCE COLUMN CREATION: Ensures no KeyError occurs if tables are missing data
+# FORCE COLUMN CREATION & CLEANING
 for col in ['district_name', 'ld_display', 'district_type', 'county_name']:
     if col not in df_merged.columns:
         df_merged[col] = "Not Listed"
     else:
-        df_merged[col] = df_merged[col].fillna("Not Listed")
+        df_merged[col] = df_merged[col].astype(str).str.strip().fillna("Not Listed")
 
 # 4. UI
 st.markdown("### 🏛️ NJ School Finance Intelligence Platform")
+
+# Debugging visibility
+st.sidebar.write(f"Types Found: {sorted(df_merged['district_type'].unique().tolist())}")
+
 c1, c2, c3, c4 = st.columns(4)
 
+# Use list(set(...)) to ensure we capture types even if they are infrequent
+types_list = sorted([str(t) for t in df_merged['district_type'].unique() if t and t != "Not Listed"])
 sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().astype(str).tolist()))
-sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].unique().astype(str).tolist()))
+sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + types_list)
 sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].unique().astype(str).tolist()))
 
 df_f = df_merged.copy()
