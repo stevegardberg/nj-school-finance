@@ -30,31 +30,34 @@ df_enroll = fetch_table("v_aggregated_enrollment")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
 
-# 3. STANDARDIZE KEYS (CDS Code is the source of truth)
+# 3. STANDARDIZE KEYS
 for df in [df_sum, df_enroll, df_map, df_types]:
     if "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
-    if "fiscal_year" in df.columns:
-        df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
 
-# 4. MERGE ON CDS CODE ONLY
+# --- DEBUGGING BLOCK ---
+st.sidebar.write("### Data Integrity Check")
+for name, df in [("Summary", df_sum), ("Enrollment", df_enroll)]:
+    boonton_rows = df[df['cds_code'].isin(['270450', '270460'])]
+    st.sidebar.write(f"{name} has {len(boonton_rows)} Boonton records.")
+# -----------------------
+
+# 4. ROBUST MERGE (Anchor to CDS Code)
+# We keep all rows from df_sum regardless of mapping/enrollment
 df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
 df_merged = df_merged.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
 
-# 5. UI - CDS CODE ANCHORED SELECTION
+# 5. UI
 st.markdown("### 🏛️ NJ School Finance Platform")
-
-# Create a clean display label while keeping CDS Code as the unique selector
-df_merged['display_label'] = df_merged['district_name'] + " (" + df_merged['cds_code'] + ")"
+# Ensure we use cds_code for the dropdown
+df_merged['display_label'] = df_merged['district_name'].fillna('Unknown') + " (" + df_merged['cds_code'] + ")"
 unique_districts = df_merged[['display_label', 'cds_code']].drop_duplicates().dropna().sort_values('display_label')
 
 sel_option = st.selectbox("Select District:", ["Select..."] + unique_districts['display_label'].tolist())
 
 if sel_option != "Select...":
-    # Pull the CDS code back out of the label to filter the data
     target_cds = unique_districts[unique_districts['display_label'] == sel_option]['cds_code'].values[0]
     target_data = df_merged[df_merged['cds_code'] == target_cds].sort_values('fiscal_year')
-    
-    st.subheader(f"📍 Financial Ledger: {sel_option}")
+    st.subheader(f"📍 Financial Ledger: {target_cds}")
     st.dataframe(target_data, use_container_width=True)
