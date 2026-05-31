@@ -17,9 +17,7 @@ def fetch_table(table):
         if res.status_code != 200 or not res.json(): break
         all_records.extend(res.json())
         page += 1
-    df = pd.DataFrame(all_records)
-    df.columns = [str(c).lower().strip() for c in df.columns]
-    return df
+    return pd.DataFrame(all_records)
 
 # 2. LOAD DATA
 df_sum = fetch_table("state_aid_summary")
@@ -27,47 +25,38 @@ df_enroll = fetch_table("v_aggregated_enrollment")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
 
-# 3. STRICT KEY STANDARDIZATION
+# 3. STANDARDIZE KEYS
 for df in [df_sum, df_enroll, df_map, df_types]:
+    df.columns = [str(c).lower().strip() for c in df.columns]
     if "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
     if "fiscal_year" in df.columns:
         df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
 
 # 4. MERGE
-# Merge Aid + Enrollment
 df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
-
-# Merge mapping with collision handling
 df_map_clean = df_map.rename(columns={'county_name': 'county_name_map'})
 df_merged = df_merged.merge(df_map_clean[['cds_code', 'ld_display', 'county_name_map']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
 
 # Resolve county_name collision safely
 if 'county_name' not in df_merged.columns:
-    df_merged['county_name'] = df_merged['county_name_map']
+    df_merged['county_name'] = df_merged.get('county_name_map', 'Unknown')
 else:
-    df_merged['county_name'] = df_merged['county_name'].combine_first(df_merged['county_name_map'])
+    df_merged['county_name'] = df_merged['county_name'].combine_first(df_merged.get('county_name_map', pd.Series(dtype=str)))
 
-# Final Data Cleanup
 df_merged['county_name'] = df_merged['county_name'].fillna('Unknown')
 df_merged['ld_display'] = df_merged['ld_display'].fillna('Unknown')
 df_merged['district_type'] = df_merged['district_type'].fillna('Unknown')
-
-# DIAGNOSTIC: Check for non-zero enrollment
-if 'resident_enrollment' in df_merged.columns:
-    count_nonzero = (df_merged['resident_enrollment'] > 0).sum()
-    st.write(f"DEBUG: {count_nonzero} rows have resident_enrollment > 0")
+df_merged['resident_enrollment'] = df_merged['resident_enrollment'].fillna(0)
 
 # 5. CALCULATIONS
-potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
-                  'equalized_valuation', 'local_fair_share', 'district_income', 'resident_enrollment']
-
-for col in potential_cols:
-    if col in df_merged.columns:
-        df_merged[col] = pd.to_numeric(df_merged[col], errors='coerce').fillna(0)
-
 def add_metrics(df):
+    num_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
+                'equalized_valuation', 'local_fair_share', 'district_income', 'resident_enrollment']
+    for col in num_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     df = df.sort_values(['district_name', 'fiscal_year'])
     df['Pct_Change_Aid'] = df.groupby('district_name')['actual_state_aid'].pct_change().fillna(0)
     df['Pct_Change_Levy'] = df.groupby('district_name')['actual_tax_levy'].pct_change().fillna(0)
@@ -114,11 +103,9 @@ if sel_district != "Select...":
     target_data = df_f[df_f['district_name'] == sel_district]
     st.subheader(f"📍 Financial Ledger: {sel_district}")
     st.dataframe(get_formatted_matrix(target_data), use_container_width=True, hide_index=True)
-  
     ld_val = target_data['ld_display'].iloc[0] if 'ld_display' in target_data.columns else None
     type_val = target_data['district_type'].iloc[0] if 'district_type' in target_data.columns else None
     target_years = target_data['fiscal_year'].unique()
-  
     for name, group_col, val in [("Legislative District", 'ld_display', ld_val), ("District Type", 'district_type', type_val)]:
         if val and val != "Unknown":
             st.markdown("---")
