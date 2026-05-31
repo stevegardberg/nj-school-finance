@@ -17,26 +17,33 @@ def fetch_table(table):
         if res.status_code != 200 or not res.json(): break
         all_records.extend(res.json())
         page += 1
-    return pd.DataFrame(all_records)
+    df = pd.DataFrame(all_records)
+    df.columns = [str(c).lower().strip() for c in df.columns]
+    return df
 
-# 2. LOAD DATA (Using the Materialized View for performance)
+# 2. LOAD DATA
 df_sum = fetch_table("state_aid_summary")
+df_enroll = fetch_table("v_aggregated_enrollment")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
-df_enroll = fetch_table("v_aggregated_enrollment") # Pre-aggregated in Supabase
 
 # Standardize Keys
-for df in [df_sum, df_map, df_types, df_enroll]:
-    df.columns = [str(c).lower().strip() for c in df.columns]
+for df in [df_sum, df_enroll, df_map, df_types]:
     if "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.zfill(6)
     if "fiscal_year" in df.columns:
         df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
 
-# 3. MERGE
+# 3. ROBUST MERGE (Using explicit columns to avoid KeyError)
 df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
 df_merged = df_merged.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
+
+# Defensive cleanup for columns
+df_merged['county_name'] = df_merged.get('county_name', 'Unknown').fillna('Unknown')
+df_merged['ld_display'] = df_merged.get('ld_display', 'Unknown').fillna('Unknown')
+df_merged['district_type'] = df_merged.get('district_type', 'Unknown').fillna('Unknown')
+df_merged['resident_enrollment'] = df_merged.get('resident_enrollment', 0).fillna(0)
 
 # 4. CALCULATIONS
 potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
@@ -98,7 +105,7 @@ if sel_district != "Select...":
     target_years = target_data['fiscal_year'].unique()
   
     for name, group_col, val in [("Legislative District", 'ld_display', ld_val), ("District Type", 'district_type', type_val)]:
-        if val:
+        if val and val != 'Unknown':
             st.markdown("---")
             st.subheader(f"🏛️ {name} Average: {val}")
             peers = df_merged[df_merged[group_col] == val].copy()
