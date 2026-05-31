@@ -4,43 +4,21 @@ import pandas as pd
 
 st.set_page_config(layout="wide")
 
-headers = {"apikey": st.secrets["headers"]["apikey"], "Authorization": st.secrets["headers"]["Authorization"]}
-BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
+# ... (rest of your fetch/merge logic from previous steps) ...
 
-@st.cache_data(ttl=3600)
-def fetch_table(table):
-    all_records = []
-    page = 0
-    while True:
-        res = requests.get(f"{BASE_URL}/{table}?select=*&limit=1000&offset={page*1000}", headers=headers)
-        if res.status_code != 200 or not res.json(): break
-        all_records.extend(res.json())
-        page += 1
-    df = pd.DataFrame(all_records)
-    df.columns = [str(c).lower().strip() for c in df.columns]
-    return df
-
+# 3. UI
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
 
-# 1. Fetch
-df_sum = fetch_table("state_aid_summary")
-df_enroll = fetch_table("v_aggregated_enrollment")
+# FORCE UNIQUE LIST
+# We convert to string and drop nulls to guarantee valid options for the dropdown
+districts = df_merged['district_name'].dropna().astype(str).unique()
+districts = sorted([d for d in districts if d and d.lower() != 'nan'])
 
-# 2. Merge
-df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
-
-# 3. DIAGNOSTIC PRINT
-st.write("Available columns in merged dataframe:", df_merged.columns.tolist())
-st.dataframe(df_merged.head())
-
-# 4. Corrected Selection Logic
-# If 'district_name' is missing, check if it's 'name' or 'districtname'
-col_options = ['district_name', 'name', 'districtname']
-actual_col = next((c for c in col_options if c in df_merged.columns), None)
-
-if actual_col:
-    st.write(f"Using '{actual_col}' as the district identifier.")
-    districts = sorted(df_merged[actual_col].dropna().unique().tolist())
-    sel_district = st.selectbox("Select District:", ["Select..."] + districts)
+if len(districts) == 0:
+    st.error("No district names found in the data.")
 else:
-    st.error("Critical Error: Could not find a district name column in the merged data.")
+    sel_district = st.selectbox("Select District:", ["Select..."] + districts)
+
+    if sel_district != "Select...":
+        target = df_merged[df_merged['district_name'].astype(str) == sel_district]
+        st.dataframe(target, use_container_width=True)
