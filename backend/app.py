@@ -12,16 +12,14 @@ BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
 @st.cache_data(ttl=3600)
 def fetch_table(table):
     try:
-        # Requesting only the View, not the raw 3M table
         url = f"{BASE_URL}/{table}?apikey={API_KEY}"
         headers = {
             "apikey": API_KEY,
             "Authorization": AUTH_TOKEN,
             "Prefer": "return=representation"
         }
-        
-        # 30s timeout to allow the DB to finish the View aggregation
-        res = requests.get(url, headers=headers, timeout=30)
+        # Increased timeout to 45s to allow the View to compute after indexing
+        res = requests.get(url, headers=headers, timeout=45)
         
         if res.status_code != 200:
             st.error(f"API Error {res.status_code} for {table}: {res.text}")
@@ -31,8 +29,6 @@ def fetch_table(table):
         if not data: return pd.DataFrame()
         if isinstance(data, dict): data = [data]
         df = pd.DataFrame(data)
-        
-        # Force lower case to ensure column matching
         df.columns = [str(c).lower().strip() for c in df.columns]
         return df
     except Exception as e:
@@ -54,8 +50,8 @@ for df in [df_sum, df_enroll, df_map, df_types]:
 
 # 4. DEFENSIVE MERGE
 required_keys = ['cds_code', 'fiscal_year']
-if not all(key in df_enroll.columns for key in required_keys):
-    st.error(f"FATAL: df_enroll is missing required keys. Found columns: {df_enroll.columns.tolist()}")
+if df_enroll.empty:
+    st.error("Enrollment data is empty. Ensure the index is created and the API is reachable.")
     st.stop()
 
 df_merged = df_sum.merge(df_enroll, on=required_keys, how='left')
