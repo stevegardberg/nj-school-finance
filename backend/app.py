@@ -26,7 +26,6 @@ df_meta = fetch_table("district_metadata_mapping")
 df_enroll = fetch_table("v_district_fte_summary")
 
 def standardize_cds(val):
-    """Force every code to be a 6-digit string."""
     s = str(val).split('.')[0].strip()
     return s.zfill(6)
 
@@ -47,9 +46,12 @@ if not df_map.empty:
 if not df_meta.empty:
     df_merged = df_merged.merge(df_meta[['cds_code', 'district_type']], on='cds_code', how='left')
 
-# FILL & CLEAN
+# FORCE COLUMN CREATION (The Robust Fix)
 for col in ['district_name', 'ld_display', 'district_type', 'county_name']:
-    df_merged[col] = df_merged.get(col, "Not Listed").astype(str).str.strip().replace("nan", "Not Listed").fillna("Not Listed")
+    if col not in df_merged.columns:
+        df_merged[col] = "Not Listed"
+    else:
+        df_merged[col] = df_merged[col].astype(str).str.strip().replace("nan", "Not Listed").fillna("Not Listed")
 
 # 4. UI
 st.markdown("### 🏛️ NJ School Finance Intelligence Platform")
@@ -57,7 +59,6 @@ st.sidebar.write(f"Types Found: {sorted(df_merged['district_type'].unique().toli
 
 c1, c2, c3, c4 = st.columns(4)
 
-# Filter unique types, removing 'Not Listed' for the dropdown
 unique_types = sorted([t for t in df_merged['district_type'].unique() if t != "Not Listed"])
 sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().tolist()))
 sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + unique_types)
