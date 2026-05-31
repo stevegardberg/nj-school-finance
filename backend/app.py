@@ -26,7 +26,7 @@ df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
 
 # 3. STANDARDIZE KEYS
-for df in [df_sum, df_enroll, df_map, df_types]:
+for name, df in [("sum", df_sum), ("enroll", df_enroll), ("map", df_map), ("types", df_types)]:
     df.columns = [str(c).lower().strip() for c in df.columns]
     if "cds_code" in df.columns:
         df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
@@ -34,7 +34,9 @@ for df in [df_sum, df_enroll, df_map, df_types]:
         df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
 
 # 4. MERGE
-df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
+merge_keys = ['cds_code', 'fiscal_year']
+df_merged = df_sum.merge(df_enroll, on=merge_keys, how='left')
+
 df_map_clean = df_map.rename(columns={'county_name': 'county_name_map'})
 df_merged = df_merged.merge(df_map_clean[['cds_code', 'ld_display', 'county_name_map']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
@@ -45,10 +47,8 @@ if 'county_name' not in df_merged.columns:
 else:
     df_merged['county_name'] = df_merged['county_name'].combine_first(df_merged.get('county_name_map', pd.Series(dtype=str)))
 
-df_merged['county_name'] = df_merged['county_name'].fillna('Unknown')
-df_merged['ld_display'] = df_merged['ld_display'].fillna('Unknown')
-df_merged['district_type'] = df_merged['district_type'].fillna('Unknown')
-df_merged['resident_enrollment'] = df_merged['resident_enrollment'].fillna(0)
+# Final Fillna
+df_merged.fillna({'county_name': 'Unknown', 'ld_display': 'Unknown', 'district_type': 'Unknown', 'resident_enrollment': 0}, inplace=True)
 
 # 5. CALCULATIONS
 def add_metrics(df):
