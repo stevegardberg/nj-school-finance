@@ -4,7 +4,7 @@ import pandas as pd
 
 st.set_page_config(layout="wide")
 
-# 1. SETUP
+# 1. SETUP & FETCH
 headers = {"apikey": st.secrets["headers"]["apikey"], "Authorization": st.secrets["headers"]["Authorization"]}
 BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
 
@@ -16,78 +16,55 @@ def fetch_table(table):
     df.columns = [str(c).lower().strip() for c in df.columns]
     return df
 
-# 2. LOAD & VALIDATE
+# LOAD DATA
 df_sum = fetch_table("state_aid_summary")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
 df_total_enroll = fetch_table("v_district_fte_summary")
 
-# Verify data exists
-if df_total_enroll.empty:
-    st.error("Enrollment data not found. Ensure the SQL View is exposed in Supabase API.")
-    st.stop()
-
-# Standardize keys (Zero-padding)
+# STANDARDIZE KEYS
 for df in [df_sum, df_map, df_types, df_total_enroll]:
     if "cds_code" in df.columns:
-        df["cds_code"] = df["cds_code"].astype(str).str.zfill(6)
+        df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
+    if "fiscal_year" in df.columns:
+        df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
 
-# 3. MERGE
+# 2. MERGE (Safety-Net Logic)
 df_merged = df_sum.merge(df_total_enroll, on=['cds_code', 'fiscal_year'], how='left')
 df_merged = df_merged.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
 df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
 
-# 4. CALCULATIONS
+# FILL NA to ensure rows aren't dropped by filters
+df_merged['ld_display'] = df_merged['ld_display'].fillna("Not Listed")
+df_merged['district_type'] = df_merged['district_type'].fillna("Not Listed")
+df_merged['county_name'] = df_merged['county_name'].fillna("Unknown")
+
+# 3. CALCULATIONS
 potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy', 
                   'equalized_valuation', 'local_fair_share', 'district_income', 'resident_enrollment']
 for col in potential_cols:
     if col in df_merged.columns:
         df_merged[col] = pd.to_numeric(df_merged[col], errors='coerce').fillna(0)
 
-def add_metrics(df):
-    df = df.sort_values(['district_name', 'fiscal_year'])
-    df['Pct_Change_Aid'] = df.groupby('district_name')['actual_state_aid'].pct_change().fillna(0)
-    df['Pct_Change_Levy'] = df.groupby('district_name')['actual_tax_levy'].pct_change().fillna(0)
-    df['Over_Under_Funded'] = df['actual_state_aid'] - df['uncapped_aid']
-    df['Over_Under_LFS'] = df['actual_tax_levy'] - df['local_fair_share']
-    df['Tax_Levy_per_100'] = (df['actual_tax_levy'] / df['equalized_valuation'].replace(0, 1)) * 100
-    return df
-
-df_merged = add_metrics(df_merged)
-
-# 5. FORMATTING
-def get_formatted_matrix(df):
-    col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded', 
-                 'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS', 
-                 'Pct_Change_Levy', 'equalized_valuation', 'Tax_Levy_per_100', 'district_income', 'resident_enrollment']
-    available_cols = [c for c in col_order if c in df.columns]
-    df_out = df[available_cols].copy()
-    rename_map = {'fiscal_year': 'Fiscal Year', 'adequacy_budget': 'Adequacy Budget', 'uncapped_aid': 'Uncapped Aid', 
-                  'actual_state_aid': 'Actual Aid', 'Over_Under_Funded': 'Over/Under Funded', 'Pct_Change_Aid': '% Change Actual Aid', 
-                  'local_fair_share': 'Local Fair Share', 'actual_tax_levy': 'Actual Levy', 'Over_Under_LFS': 'Over/Under LFS', 
-                  'Pct_Change_Levy': '% Change Actual Levy', 'equalized_valuation': 'Equalized Valuation', 
-                  'Tax_Levy_per_100': 'Levy per $100', 'district_income': 'District Income', 'resident_enrollment': 'Resident Enrollment'}
-    df_out = df_out.rename(columns=rename_map)
-    for col in df_out.columns:
-        if col != 'Fiscal Year':
-            df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if '%' not in col and 'per $100' not in col.lower() and 'Enrollment' not in col else (f"{float(x):.2%}" if '%' in col else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"{float(x):,.0f}")))
-    return df_out
-
-# 6. UI
+# 4. UI FILTERS
 st.markdown("### 🏛️ NJ School Finance Platform")
+
+# Debugging visibility (Visible only if "Boonton" is in the data)
+if not df_merged[df_merged['district_name'].str.contains("Boonton", na=False)].empty:
+    st.success("Boonton Town data is present in the database.")
+
 c1, c2, c3, c4 = st.columns(4)
-sel_ld = c1.selectbox("Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().tolist()))
-sel_type = c2.selectbox("District Type:", ["All"] + sorted(df_merged['district_type'].dropna().unique().tolist()))
-sel_county = c3.selectbox("County:", ["All"] + sorted(df_merged['county_name'].dropna().unique().tolist()))
+sel_ld = c1.selectbox("Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().tolist()))
+sel_type = c2.selectbox("District Type:", ["All"] + sorted(df_merged['district_type'].unique().tolist()))
+sel_county = c3.selectbox("County:", ["All"] + sorted(df_merged['county_name'].unique().tolist()))
 
 df_f = df_merged.copy()
 if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
 if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
 if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
 
-sel_district = c4.selectbox("District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().tolist()))
+sel_district = c4.selectbox("District:", ["Select..."] + sorted(df_f['district_name'].unique().tolist()))
 
 if sel_district != "Select...":
     target_data = df_f[df_f['district_name'] == sel_district]
-    st.subheader(f"📍 Financial Ledger: {sel_district}")
-    st.dataframe(get_formatted_matrix(target_data), use_container_width=True, hide_index=True)
+    st.dataframe(target_data, use_container_width=True)
