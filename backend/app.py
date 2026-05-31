@@ -38,14 +38,25 @@ for df in [df_sum, df_enroll, df_map, df_types]:
         df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
 
 # 4. ROBUST MERGE
-# Use outer join to ensure districts in df_sum aren't dropped if missing mapping/enrollment data
-df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
-df_merged = df_merged.merge(df_map.rename(columns={'county_name': 'county_name_map'}), on='cds_code', how='left')
-df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
+# Initialize df_merged from df_sum to ensure we keep the base district information
+df_merged = df_sum.copy() 
+if not df_enroll.empty:
+    df_merged = df_merged.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
+
+# Merge metadata
+if not df_map.empty:
+    df_merged = df_merged.merge(df_map.rename(columns={'county_name': 'county_name_map'}), on='cds_code', how='left')
+if not df_types.empty:
+    df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
+
+# 5. VALIDATION: Check for required columns
+if 'district_name' not in df_merged.columns:
+    st.error(f"FATAL: Column 'district_name' not found. Available columns are: {df_merged.columns.tolist()}")
+    st.stop()
 
 df_merged.fillna({'county_name': 'Unknown', 'ld_display': 'Unknown', 'district_type': 'Unknown', 'resident_enrollment': 0}, inplace=True)
 
-# 5. CALCULATIONS
+# 6. CALCULATIONS
 def add_metrics(df):
     num_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy', 'equalized_valuation', 'local_fair_share', 'district_income', 'resident_enrollment']
     for col in num_cols:
@@ -54,7 +65,7 @@ def add_metrics(df):
 
 df_merged = add_metrics(df_merged)
 
-# 6. FORMATTING
+# 7. FORMATTING
 def get_formatted_matrix(df):
     col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'local_fair_share', 'actual_tax_levy', 'equalized_valuation', 'resident_enrollment']
     available_cols = [c for c in col_order if c in df.columns]
@@ -66,7 +77,7 @@ def get_formatted_matrix(df):
             df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if 'Enrollment' not in col else f"{float(x):,.0f}")
     return df_out
 
-# 7. UI
+# 8. UI
 st.markdown("### 🏛️ NJ School Finance Platform")
 district_list = sorted(df_merged['district_name'].dropna().unique().tolist())
 sel_district = st.selectbox("Select District:", ["Select..."] + district_list)
