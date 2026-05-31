@@ -21,20 +21,21 @@ def fetch_table(table):
     df.columns = [str(c).lower().strip() for c in df.columns]
     return df
 
-# 2. LOAD & AGGREGATE
+# 2. LOAD DATA
 df_sum = fetch_table("state_aid_summary")
+df_enroll = fetch_table("v_aggregated_enrollment")
 df_map = fetch_table("legislative_mapping")
 df_types = fetch_table("vw_district_cohorts")
-df_enroll = fetch_table("v_aggregated_enrollment") # Optimized Materialized View
 
-# Standardize keys
-for df in [df_sum, df_map, df_types, df_enroll]:
+# 3. STRICT KEY STANDARDIZATION
+for df in [df_sum, df_enroll, df_map, df_types]:
     if "cds_code" in df.columns:
-        df["cds_code"] = df["cds_code"].astype(str).str.zfill(6)
+        df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
     if "fiscal_year" in df.columns:
         df["fiscal_year"] = df["fiscal_year"].astype(str).str.strip()
 
-# 3. MERGE
+# 4. MERGE
+# Merge Aid + Enrollment
 df_merged = df_sum.merge(df_enroll, on=['cds_code', 'fiscal_year'], how='left')
 
 # Merge mapping with collision handling
@@ -48,11 +49,17 @@ if 'county_name' not in df_merged.columns:
 else:
     df_merged['county_name'] = df_merged['county_name'].combine_first(df_merged['county_name_map'])
 
+# Final Data Cleanup
 df_merged['county_name'] = df_merged['county_name'].fillna('Unknown')
 df_merged['ld_display'] = df_merged['ld_display'].fillna('Unknown')
 df_merged['district_type'] = df_merged['district_type'].fillna('Unknown')
 
-# 4. CALCULATIONS
+# DIAGNOSTIC: Check for non-zero enrollment
+if 'resident_enrollment' in df_merged.columns:
+    count_nonzero = (df_merged['resident_enrollment'] > 0).sum()
+    st.write(f"DEBUG: {count_nonzero} rows have resident_enrollment > 0")
+
+# 5. CALCULATIONS
 potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
                   'equalized_valuation', 'local_fair_share', 'district_income', 'resident_enrollment']
 
@@ -71,7 +78,7 @@ def add_metrics(df):
 
 df_merged = add_metrics(df_merged)
 
-# 5. FORMATTING
+# 6. FORMATTING
 def get_formatted_matrix(df):
     col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded',
                  'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS',
@@ -89,7 +96,7 @@ def get_formatted_matrix(df):
             df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if '%' not in col and 'per $100' not in col.lower() and 'Enrollment' not in col else (f"{float(x):.2%}" if '%' in col else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"{float(x):,.0f}")))
     return df_out
 
-# 6. UI
+# 7. UI
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
 c1, c2, c3, c4 = st.columns(4)
 sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().tolist()))
