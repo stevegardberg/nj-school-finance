@@ -20,32 +20,29 @@ def get_data():
     df_map = fetch_table("legislative_mapping")
     df_types = fetch_table("district_metadata_mapping") 
 
-    # Clean cds_code
+    # Clean CDS codes to 6-digit strings
     for df in [df_sum, df_map, df_types]:
         if "cds_code" in df.columns:
-            df["cds_code"] = df["cds_code"].astype(str).str.zfill(6)
+            df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
 
-    # Merge legislative mapping
+    # Merge
     df = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
+    df = df.merge(df_types[['cds_code', 'district_name', 'district_type']], on='cds_code', how='left')
+    
+    # Debug: Check if Boonton Town exists after merge
+    if df.empty:
+        st.error("Merge resulted in empty table. Verify CDS alignment.")
+    
+    return df
 
-    # Defensive merge for district_type
-    if 'cds_code' in df_types.columns and 'district_type' in df_types.columns:
-        df = df.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
-    else:
-        df['district_type'] = 'Unknown'
-    
-    if 'county_name' not in df.columns: df['county_name'] = 'Unassigned'
-    
-    # Ensure numeric columns
+# Metrics
+def add_metrics(df):
+    df = df.sort_values(['district_name', 'fiscal_year'])
     potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
                       'equalized_valuation', 'local_fair_share', 'district_income']
     for col in potential_cols:
         if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     
-    return df
-
-def add_metrics(df):
-    df = df.sort_values(['district_name', 'fiscal_year'])
     df['Pct_Change_Aid'] = df.groupby('district_name')['actual_state_aid'].pct_change().fillna(0)
     df['Pct_Change_Levy'] = df.groupby('district_name')['actual_tax_levy'].pct_change().fillna(0)
     df['Over_Under_Funded'] = df['actual_state_aid'] - df['uncapped_aid']
@@ -74,16 +71,16 @@ def get_formatted_matrix(df):
 df_merged = add_metrics(get_data())
 
 st.sidebar.header("Filter Settings")
-sel_ld = st.sidebar.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().tolist()))
-sel_type = st.sidebar.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].dropna().unique().tolist()))
-sel_county = st.sidebar.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].dropna().unique().tolist()))
+sel_ld = st.sidebar.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().astype(str).tolist()))
+sel_type = st.sidebar.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].dropna().unique().astype(str).tolist()))
+sel_county = st.sidebar.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].dropna().unique().astype(str).tolist()))
 
 df_f = df_merged.copy()
-if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
-if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
-if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
+if sel_ld != "All": df_f = df_f[df_f['ld_display'].astype(str) == sel_ld]
+if sel_type != "All": df_f = df_f[df_f['district_type'].astype(str) == sel_type]
+if sel_county != "All": df_f = df_f[df_f['county_name'].astype(str) == sel_county]
 
-sel_district = st.sidebar.selectbox("4️⃣ Select District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().tolist()))
+sel_district = st.sidebar.selectbox("4️⃣ Select District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().astype(str).tolist()))
 
 page = st.sidebar.radio("Navigation", ["Financial Ledger", "Comparative Analysis", "Revenue Matrix"])
 
