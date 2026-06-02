@@ -20,6 +20,7 @@ def get_data():
     df_map = fetch_table("legislative_mapping")
     df_types = fetch_table("district_metadata_mapping") 
 
+    # Normalization: Standardize CDS codes
     for df in [df_sum, df_map, df_types]:
         target_col = 'cds' if 'cds' in df.columns else 'cds_code'
         if target_col in df.columns:
@@ -29,37 +30,28 @@ def get_data():
     # Merge
     df = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
     
-    # Merge Metadata (Defensive)
+    # Merge Metadata (Defensive: Print columns to help you debug)
     if 'district_type' in df_types.columns:
         df = df.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
     else:
-        st.sidebar.error(f"Missing 'district_type'. Found: {list(df_types.columns)}")
+        st.sidebar.warning(f"District Type column not found. Found: {list(df_types.columns)}")
         df['district_type'] = 'Unknown'
     
     if 'county_name' not in df.columns: df['county_name'] = 'Unassigned'
+    
     return df
 
-# Metrics
+# 3. METRICS
 def add_metrics(df):
-    potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
-                      'equalized_valuation', 'local_fair_share', 'district_income']
+    potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy', 'equalized_valuation']
     for col in potential_cols:
         if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    
-    df = df.sort_values(['district_name', 'fiscal_year'])
     return df
 
-def get_formatted_matrix(df):
-    col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 
-                 'local_fair_share', 'actual_tax_levy', 'equalized_valuation']
-    available_cols = [c for c in col_order if c in df.columns]
-    return df[available_cols].copy()
-
-# 3. APP EXECUTION
+# 4. UI
 df_merged = add_metrics(get_data())
 
 st.sidebar.header("Filter Settings")
-# Safely handle dropdowns even if columns contain NaNs
 sel_ld = st.sidebar.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().astype(str).tolist()))
 sel_type = st.sidebar.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].fillna('Unknown').unique().astype(str).tolist()))
 sel_county = st.sidebar.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].fillna('Unassigned').unique().astype(str).tolist()))
@@ -71,12 +63,18 @@ if sel_county != "All": df_f = df_f[df_f['county_name'].astype(str) == sel_count
 
 sel_district = st.sidebar.selectbox("4️⃣ Select District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().astype(str).tolist()))
 
-page = st.sidebar.radio("Navigation", ["Financial Ledger", "Comparative Analysis", "Revenue Matrix"])
+# 5. NAVIGATION
+page = st.sidebar.radio("Navigation", ["Financial Ledger", "Revenue Matrix"])
 
-if page == "Financial Ledger" and sel_district != "Select...":
-    st.dataframe(get_formatted_matrix(df_f[df_f['district_name'] == sel_district]), use_container_width=True)
-elif page == "Revenue Matrix" and sel_district != "Select...":
-    target_cds = df_f[df_f['district_name'] == sel_district]['cds_code'].iloc[0]
-    rev_data = fetch_table(f"revenue?cds_code=eq.{target_cds}")
-    if not rev_data.empty:
-        st.dataframe(rev_data.pivot_table(index='fiscal_year', columns='line_desc', values='amount', aggfunc='sum'), use_container_width=True)
+if sel_district != "Select...":
+    if page == "Financial Ledger":
+        st.title(f"📍 Financial Ledger: {sel_district}")
+        st.dataframe(df_f[df_f['district_name'] == sel_district], use_container_width=True)
+    elif page == "Revenue Matrix":
+        st.title(f"🧮 Revenue Matrix: {sel_district}")
+        target_cds = df_f[df_f['district_name'] == sel_district]['cds_code'].iloc[0]
+        rev_data = fetch_table(f"revenue?cds_code=eq.{target_cds}")
+        if not rev_data.empty:
+            st.dataframe(rev_data.pivot_table(index='fiscal_year', columns='line_desc', values='amount', aggfunc='sum'), use_container_width=True)
+        else:
+            st.info("No revenue data found for this district.")
