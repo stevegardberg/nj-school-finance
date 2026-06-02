@@ -20,15 +20,23 @@ def get_data():
     df_map = fetch_table("legislative_mapping")
     df_types = fetch_table("district_metadata_mapping") 
 
+    # Clean cds_code
     for df in [df_sum, df_map, df_types]:
         if "cds_code" in df.columns:
             df["cds_code"] = df["cds_code"].astype(str).str.zfill(6)
 
+    # Merge legislative mapping
     df = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
-    df = df.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
+
+    # Defensive merge for district_type
+    if 'cds_code' in df_types.columns and 'district_type' in df_types.columns:
+        df = df.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
+    else:
+        df['district_type'] = 'Unknown'
     
     if 'county_name' not in df.columns: df['county_name'] = 'Unassigned'
     
+    # Ensure numeric columns
     potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
                       'equalized_valuation', 'local_fair_share', 'district_income']
     for col in potential_cols:
