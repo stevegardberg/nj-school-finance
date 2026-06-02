@@ -19,23 +19,27 @@ def fetch_table(table):
         page += 1
     return pd.DataFrame(all_records)
 
-# 2. LOAD & MERGE
 @st.cache_data(ttl=3600)
 def get_data():
     df_sum = fetch_table("state_aid_summary")
     df_map = fetch_table("legislative_mapping")
-    # Corrected table name based on your schema audit
     df_meta = fetch_table("district_metadata_mapping")
-
+    
+    # 1. Initialize metadata with correct columns if empty
+    required_meta = ['cds_code', 'district_type', 'district_name']
+    if df_meta.empty:
+        df_meta = pd.DataFrame(columns=required_meta)
+    
+    # Ensure keys are strings and standardized
     for df in [df_sum, df_map, df_meta]:
         if "cds_code" in df.columns:
-            df["cds_code"] = df["cds_code"].astype(str).str.zfill(6)
+            df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
 
-    # Merge legislative mapping
+    # 2. Merge legislative mapping
     df_merged = df_sum.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
     
-    # Merge metadata (district_type and district_name)
-    df_merged = df_merged.merge(df_meta[['cds_code', 'district_type', 'district_name']], on='cds_code', how='left')
+    # 3. Merge metadata safely
+    df_merged = df_merged.merge(df_meta[required_meta], on='cds_code', how='left')
     
     return df_merged
 
@@ -49,7 +53,7 @@ def add_metrics(df):
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            
+    
     df['Pct_Change_Aid'] = df.groupby('district_name')['actual_state_aid'].pct_change().fillna(0)
     df['Pct_Change_Levy'] = df.groupby('district_name')['actual_tax_levy'].pct_change().fillna(0)
     df['Over_Under_Funded'] = df['actual_state_aid'] - df['uncapped_aid']
@@ -57,7 +61,7 @@ def add_metrics(df):
     df['Tax_Levy_per_100'] = (df['actual_tax_levy'] / df['equalized_valuation'].replace(0, 1)) * 100
     return df
 
-# 4. FORMATTING & UI (Your original structure)
+# 4. FORMATTING
 def get_formatted_matrix(df):
     col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded',
                  'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS',
@@ -75,6 +79,7 @@ def get_formatted_matrix(df):
             df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if '%' not in col and 'per $100' not in col.lower() else (f"{float(x):.2%}" if '%' in col else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"{float(x):,.0f}")))
     return df_out
 
+# 5. UI
 df_merged = add_metrics(get_data())
 
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
