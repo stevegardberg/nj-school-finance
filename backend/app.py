@@ -25,55 +25,40 @@ def get_data():
     df_map = fetch_table("legislative_mapping")
     df_meta = fetch_table("district_metadata_mapping")
     
-    # Standardize CDS codes
+    # 1. Ensure basic columns exist so code doesn't crash
     for df in [df_sum, df_map, df_meta]:
         if 'cds_code' in df.columns:
             df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
-
-    # Merge
-    df = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
     
-    # Merge metadata if columns exist
-    if not df_meta.empty:
-        meta_cols = [c for c in ['cds_code', 'district_type', 'district_name'] if c in df_meta.columns]
-        df = df.merge(df_meta[meta_cols], on='cds_code', how='left')
+    # 2. Merge
+    df = df_sum.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
+    df = df.merge(df_meta[['cds_code', 'district_type', 'district_name']], on='cds_code', how='left')
     
-    # SAFE COLUMN INITIALIZATION
-    if 'county_name' not in df.columns: df['county_name'] = 'Unassigned'
-    if 'district_name' not in df.columns: df['district_name'] = 'Unknown'
-    if 'district_type' not in df.columns: df['district_type'] = 'Unknown'
+    # 3. CRITICAL: Clean the data so dropdowns don't crash
+    df['district_name'] = df['district_name'].fillna('Unknown').astype(str)
+    df['district_type'] = df['district_type'].fillna('Unknown').astype(str)
+    df['county_name'] = df['county_name'].fillna('Unassigned').astype(str)
+    df['ld_display'] = df['ld_display'].fillna('N/A').astype(str)
     
     return df
 
-def add_metrics(df):
-    numeric_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
-                    'equalized_valuation', 'local_fair_share', 'district_income']
-    for col in numeric_cols:
-        if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    
-    df = df.sort_values(['district_name', 'fiscal_year'])
-    return df
-
-def get_formatted_matrix(df):
-    rename_map = {'fiscal_year': 'Fiscal Year', 'adequacy_budget': 'Adequacy Budget', 'actual_state_aid': 'Actual Aid',
-                  'actual_tax_levy': 'Actual Levy', 'equalized_valuation': 'Equalized Valuation'}
-    cols = [c for c in rename_map.keys() if c in df.columns]
-    return df[cols].rename(columns=rename_map)
-
-# UI
-df_merged = add_metrics(get_data())
+df_merged = get_data()
 
 st.sidebar.header("Filter Settings")
-sel_ld = st.sidebar.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().astype(str).tolist()))
-sel_type = st.sidebar.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].unique().astype(str).tolist()))
-sel_county = st.sidebar.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].unique().astype(str).tolist()))
 
+# Dropdowns using cleaned data
+sel_ld = st.sidebar.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().tolist()))
+sel_type = st.sidebar.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].unique().tolist()))
+sel_county = st.sidebar.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].unique().tolist()))
+
+# Filtering
 df_f = df_merged.copy()
-if sel_ld != "All": df_f = df_f[df_f['ld_display'].astype(str) == sel_ld]
-if sel_type != "All": df_f = df_f[df_f['district_type'].astype(str) == sel_type]
-if sel_county != "All": df_f = df_f[df_f['county_name'].astype(str) == sel_county]
+if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
+if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
+if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
 
-sel_district = st.sidebar.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].unique().astype(str).tolist()))
+sel_district = st.sidebar.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].unique().tolist()))
 
+st.title("🏛️ NJ School Finance Intelligence")
 if sel_district != "Select...":
-    st.dataframe(get_formatted_matrix(df_f[df_f['district_name'] == sel_district]), use_container_width=True)
+    st.dataframe(df_f[df_f['district_name'] == sel_district], use_container_width=True)
