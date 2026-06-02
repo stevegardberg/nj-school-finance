@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 
-st.set_page_config(layout="wide", page_title="NJ School Finance Intelligence")
+st.set_page_config(layout="wide")
 
 # 1. SETUP
 headers = {"apikey": st.secrets["headers"]["apikey"], "Authorization": st.secrets["headers"]["Authorization"]}
@@ -19,72 +19,85 @@ def fetch_table(table):
         page += 1
     return pd.DataFrame(all_records)
 
-@st.cache_data(ttl=3600)
-def get_data():
-    df_sum = fetch_table("state_aid_summary")
-    df_map = fetch_table("legislative_mapping")
-    df_types = fetch_table("vw_district_cohorts")
+# 2. LOAD & MERGE
+df_sum = fetch_table("state_aid_summary")
+df_map = fetch_table("legislative_mapping")
+df_types = fetch_table("vw_district_cohorts")
 
-    for df in [df_sum, df_map, df_types]:
-        col = 'cds' if 'cds' in df.columns else 'cds_code'
-        if col in df.columns:
-            df.rename(columns={col: 'cds_code'}, inplace=True)
-            df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
+for df in [df_sum, df_map, df_types]:
+    if "cds_code" in df.columns:
+        df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
 
-    # Perform Merge
-    df = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
-    df = df.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
-    
-    # Fill defaults
-    df['district_name'] = df['district_name'].fillna('Unknown')
-    df['county_name'] = df['county_name'].fillna('Unassigned')
-    df['district_type'] = df['district_type'].fillna('Unknown')
-    
-    return df
+df_merged = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
+df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
+if 'county_name' not in df_merged.columns: df_merged['county_name'] = 'Unassigned'
 
-# Metrics Calculation
+# 3. CALCULATIONS
 def add_metrics(df):
-    numeric_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
-                    'equalized_valuation', 'local_fair_share', 'district_income']
-    for col in numeric_cols:
-        if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    df = df.sort_values(['district_name', 'fiscal_year'])
+    potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
+                      'equalized_valuation', 'local_fair_share', 'district_income']
+    for col in potential_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    
+    df['Pct_Change_Aid'] = df.groupby('district_name')['actual_state_aid'].pct_change().fillna(0)
+    df['Pct_Change_Levy'] = df.groupby('district_name')['actual_tax_levy'].pct_change().fillna(0)
+    df['Over_Under_Funded'] = df['actual_state_aid'] - df['uncapped_aid']
+    df['Over_Under_LFS'] = df['actual_tax_levy'] - df['local_fair_share']
+    df['Tax_Levy_per_100'] = (df['actual_tax_levy'] / df['equalized_valuation'].replace(0, 1)) * 100
     return df
 
-# UI Setup
-df_merged = add_metrics(get_data())
+df_merged = add_metrics(df_merged)
 
-st.sidebar.header("Filter Settings")
-sel_ld = st.sidebar.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().astype(str).tolist()))
-sel_type = st.sidebar.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].unique().astype(str).tolist()))
-sel_county = st.sidebar.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].unique().astype(str).tolist()))
+# 4. FORMATTING
+def get_formatted_matrix(df):
+    col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded',
+                 'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS',
+                 'Pct_Change_Levy', 'equalized_valuation', 'Tax_levy_per_100', 'district_income']
+    # Filter for columns that actually exist in the passed df
+    available_cols = [c for c in col_order if c in df.columns]
+    df_out = df[available_cols].copy()
+    
+    rename_map = {'fiscal_year': 'Fiscal Year', 'adequacy_budget': 'Adequacy Budget', 'uncapped_aid': 'Uncapped Aid',
+                  'actual_state_aid': 'Actual Aid', 'Over_Under_Funded': 'Over/Under Funded', 'Pct_Change_Aid': '% Change Actual Aid',
+                  'local_fair_share': 'Local Fair Share', 'actual_tax_levy': 'Actual Levy', 'Over_Under_LFS': 'Over/Under LFS',
+                  'Pct_Change_Levy': '% Change Actual Levy', 'equalized_valuation': 'Equalized Valuation',
+                  'Tax_Levy_per_100': 'Levy per $100', 'district_income': 'District Income'}
+    
+    df_out = df_out.rename(columns=rename_map)
+    for col in df_out.columns:
+        if col != 'Fiscal Year':
+            df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if '%' not in col and 'per $100' not in col.lower() else (f"{float(x):.2%}" if '%' in col else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"${float(x):,.0f}")))
+    return df_out
 
-# Apply filters
-df_f = df_merged.copy()
-if sel_ld != "All": df_f = df_f[df_f['ld_display'].astype(str) == sel_ld]
-if sel_type != "All": df_f = df_f[df_f['district_type'].astype(str) == sel_type]
-if sel_county != "All": df_f = df_f[df_f['county_name'].astype(str) == sel_county]
-
-# Safe district selection
-districts = sorted(df_f['district_name'].unique().astype(str).tolist())
-sel_district = st.sidebar.selectbox("4️⃣ Select District:", ["Select..."] + districts)
-
-# Page Layout
+# 5. UI
+st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
 page = st.sidebar.radio("Navigation", ["Financial Ledger", "Revenue Matrix"])
+c1, c2, c3, c4 = st.columns(4)
+sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().tolist()))
+sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].dropna().unique().tolist()))
+sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].dropna().unique().tolist()))
+
+df_f = df_merged.copy()
+if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
+if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
+if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
+
+sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().tolist()))
 
 if sel_district != "Select...":
     target_data = df_f[df_f['district_name'] == sel_district]
+    target_cds = target_data['cds_code'].iloc[0]
     
-    if not target_data.empty:
-        if page == "Financial Ledger":
-            st.title(f"📍 Financial Ledger: {sel_district}")
-            st.dataframe(target_data, use_container_width=True)
-        elif page == "Revenue Matrix":
-            st.title(f"🧮 Revenue Matrix: {sel_district}")
-            target_cds = target_data['cds_code'].iloc[0]
-            rev_data = fetch_table(f"revenue?cds_code=eq.{target_cds}")
-            if not rev_data.empty:
-                st.dataframe(rev_data.pivot_table(index='fiscal_year', columns='line_desc', values='amount', aggfunc='sum'), use_container_width=True)
-            else:
-                st.info("No revenue data found for this district.")
-    else:
-        st.warning("No data found for the selected filter combination.")
+    if page == "Financial Ledger":
+        st.subheader(f"📍 Financial Ledger: {sel_district}")
+        st.dataframe(get_formatted_matrix(target_data), use_container_width=True, hide_index=True)
+    
+    elif page == "Revenue Matrix":
+        st.subheader(f"🧮 Revenue Matrix: {sel_district}")
+        rev_data = fetch_table(f"revenue?cds_code=eq.{target_cds}")
+        if not rev_data.empty:
+            pivot = rev_data.pivot_table(index='fiscal_year', columns='line_desc', values='amount', aggfunc='sum')
+            st.dataframe(pivot, use_container_width=True)
+        else:
+            st.info(f"No revenue data found for CDS {target_cds}")
