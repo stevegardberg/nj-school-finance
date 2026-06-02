@@ -24,48 +24,45 @@ def get_data():
     df_map = fetch_table("legislative_mapping")
     df_meta = fetch_table("district_metadata_mapping")
     
-    # Ensure CDS_CODE is consistently string for merging
+    # Standardize CDS_CODE
     for df in [df_sum, df_map, df_meta]:
         if 'cds_code' in df.columns:
             df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
 
-    # Merge: State Aid + Legislative Mapping
+    # Merge
     df = df_sum.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
     
-    # Merge: Metadata
-    # We use a left merge to ensure we keep all records from state_aid_summary
+    # Merge Metadata
     if not df_meta.empty:
-        df = df.merge(df_meta[['cds_code', 'district_type', 'district_name']], on='cds_code', how='left', suffixes=('', '_meta'))
-        # Prioritize metadata names if available, else keep summary names
-        if 'district_name_meta' in df.columns:
-            df['district_name'] = df['district_name_meta'].combine_first(df['district_name'])
+        df = df.merge(df_meta[['cds_code', 'district_type', 'district_name']], on='cds_code', how='left')
     
-    # Clean up columns to prevent dropdown/sorting errors
-    df['district_name'] = df['district_name'].fillna('Unknown')
-    df['county_name'] = df['county_name'].fillna('Unassigned')
-    df['district_type'] = df['district_type'].fillna('Unknown')
-    df['ld_display'] = df['ld_display'].fillna('N/A')
-    
+    # SAFE INITIALIZATION: Create columns if they don't exist after merge
+    required_cols = ['district_name', 'county_name', 'district_type', 'ld_display']
+    for col in required_cols:
+        if col not in df.columns:
+            df[col] = 'Unknown'
+        else:
+            df[col] = df[col].fillna('Unknown')
+            
     return df
 
-# Initialize Data
+# UI Logic
 df_merged = get_data()
 
-# Sidebar Filters
 st.sidebar.header("Filter Settings")
-sel_ld = st.sidebar.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().tolist()))
-sel_type = st.sidebar.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].unique().tolist()))
-sel_county = st.sidebar.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].unique().tolist()))
+# Use the safely initialized columns
+sel_ld = st.sidebar.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].astype(str).unique().tolist()))
+sel_type = st.sidebar.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].astype(str).unique().tolist()))
+sel_county = st.sidebar.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].astype(str).unique().tolist()))
 
-# Filtering logic
+# Filter
 df_f = df_merged.copy()
-if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
-if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
-if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
+if sel_ld != "All": df_f = df_f[df_f['ld_display'].astype(str) == sel_ld]
+if sel_type != "All": df_f = df_f[df_f['district_type'].astype(str) == sel_type]
+if sel_county != "All": df_f = df_f[df_f['county_name'].astype(str) == sel_county]
 
-sel_district = st.sidebar.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].unique().tolist()))
+sel_district = st.sidebar.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].astype(str).unique().tolist()))
 
-# UI Display
 st.title("🏛️ NJ School Finance Intelligence")
 if sel_district != "Select...":
     st.dataframe(df_f[df_f['district_name'] == sel_district], use_container_width=True)
