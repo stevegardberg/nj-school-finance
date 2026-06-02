@@ -23,19 +23,30 @@ def fetch_table(table):
 def get_data():
     df_sum = fetch_table("state_aid_summary")
     df_map = fetch_table("legislative_mapping")
-    # Corrected table name based on your schema audit
     df_types = fetch_table("district_metadata_mapping") 
 
+    # Standardize CDS codes
     for df in [df_sum, df_map, df_types]:
-        if "cds_code" in df.columns:
+        col = 'cds' if 'cds' in df.columns else 'cds_code'
+        if col in df.columns:
+            df.rename(columns={col: 'cds_code'}, inplace=True)
             df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
 
     # Perform Merge
     df = df_sum.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
-    df = df.merge(df_types[['cds_code', 'district_type', 'district_name']], on='cds_code', how='left')
     
-    # Clean up merged names
-    df['district_name'] = df['district_name_y'].fillna(df['district_name_x'])
+    # DYNAMIC MERGE: Check available columns in df_types before merging
+    cols_to_merge = [c for c in ['cds_code', 'district_type', 'district_name'] if c in df_types.columns]
+    
+    # Diagnostic: Show us what columns actually exist
+    st.sidebar.write("Available Metadata Columns:", df_types.columns.tolist())
+    
+    if len(cols_to_merge) > 1:
+        df = df.merge(df_types[cols_to_merge], on='cds_code', how='left')
+    else:
+        st.sidebar.error(f"Cannot merge. Expected [cds_code, district_type, district_name], but found: {list(df_types.columns)}")
+    
+    df['district_name'] = df['district_name_y'].fillna(df['district_name_x']) if 'district_name_y' in df.columns else df['district_name_x']
     df['county_name'] = df['county_name'].fillna('Unassigned')
     df['district_type'] = df['district_type'].fillna('Unknown')
     
@@ -49,7 +60,7 @@ sel_ld = st.sidebar.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged
 sel_type = st.sidebar.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].unique().astype(str).tolist()))
 sel_county = st.sidebar.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].unique().astype(str).tolist()))
 
-# Filter Logic
+# Filtering logic
 df_f = df_merged.copy()
 if sel_ld != "All": df_f = df_f[df_f['ld_display'].astype(str) == sel_ld]
 if sel_type != "All": df_f = df_f[df_f['district_type'].astype(str) == sel_type]
@@ -57,19 +68,7 @@ if sel_county != "All": df_f = df_f[df_f['county_name'].astype(str) == sel_count
 
 sel_district = st.sidebar.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].unique().astype(str).tolist()))
 
-# Page Logic
+# Display
 st.title("🏛️ New Jersey School Finance Intelligence")
-page = st.radio("Navigation", ["Financial Ledger", "Revenue Matrix"], horizontal=True)
-
 if sel_district != "Select...":
-    target_data = df_f[df_f['district_name'] == sel_district]
-    if page == "Financial Ledger":
-        st.subheader(f"📍 Financial Ledger: {sel_district}")
-        st.dataframe(target_data, use_container_width=True)
-    else:
-        target_cds = target_data['cds_code'].iloc[0]
-        rev_data = fetch_table(f"revenue?cds_code=eq.{target_cds}")
-        if not rev_data.empty:
-            st.dataframe(rev_data.pivot_table(index='fiscal_year', columns='line_desc', values='amount', aggfunc='sum'), use_container_width=True)
-        else:
-            st.info("No revenue data found.")
+    st.dataframe(df_f[df_f['district_name'] == sel_district], use_container_width=True)
