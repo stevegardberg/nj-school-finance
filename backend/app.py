@@ -23,53 +23,49 @@ def fetch_table(table):
 def get_data():
     df_sum = fetch_table("state_aid_summary")
     df_map = fetch_table("legislative_mapping")
-    
-    for df in [df_sum, df_map]:
-        if 'cds_code' in df.columns:
+    # Corrected table name based on your schema audit
+    df_types = fetch_table("district_metadata_mapping") 
+
+    for df in [df_sum, df_map, df_types]:
+        if "cds_code" in df.columns:
             df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
 
-    # Perform stable merge
-    df = df_sum.merge(df_map[['cds_code', 'ld_display', 'district_name']], on='cds_code', how='left')
+    # Perform Merge
+    df = df_sum.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
+    df = df.merge(df_types[['cds_code', 'district_type', 'district_name']], on='cds_code', how='left')
+    
+    # Clean up merged names
     df['district_name'] = df['district_name_y'].fillna(df['district_name_x'])
-    df['county_name'] = df.get('county_name', 'Unassigned')
+    df['county_name'] = df['county_name'].fillna('Unassigned')
+    df['district_type'] = df['district_type'].fillna('Unknown')
+    
     return df
 
-def add_metrics(df):
-    numeric_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
-                    'equalized_valuation', 'local_fair_share', 'district_income']
-    for col in numeric_cols:
-        if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    df = df.sort_values(['district_name', 'fiscal_year'])
-    return df
-
-def get_formatted_matrix(df):
-    col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 
-                 'local_fair_share', 'actual_tax_levy', 'equalized_valuation', 'district_income']
-    df_out = df[[c for c in col_order if c in df.columns]].copy()
-    return df_out
-
-# Execution
-df_merged = add_metrics(get_data())
+# UI Setup
+df_merged = get_data()
 
 st.sidebar.header("Filter Settings")
 sel_ld = st.sidebar.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().astype(str).tolist()))
-sel_county = st.sidebar.selectbox("2️⃣ County:", ["All"] + sorted(df_merged['county_name'].fillna('Unassigned').unique().astype(str).tolist()))
+sel_type = st.sidebar.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].unique().astype(str).tolist()))
+sel_county = st.sidebar.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].unique().astype(str).tolist()))
 
+# Filter Logic
 df_f = df_merged.copy()
 if sel_ld != "All": df_f = df_f[df_f['ld_display'].astype(str) == sel_ld]
+if sel_type != "All": df_f = df_f[df_f['district_type'].astype(str) == sel_type]
 if sel_county != "All": df_f = df_f[df_f['county_name'].astype(str) == sel_county]
 
-sel_district = st.sidebar.selectbox("3️⃣ District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().astype(str).tolist()))
+sel_district = st.sidebar.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].unique().astype(str).tolist()))
 
-# Page Content
+# Page Logic
 st.title("🏛️ New Jersey School Finance Intelligence")
 page = st.radio("Navigation", ["Financial Ledger", "Revenue Matrix"], horizontal=True)
 
 if sel_district != "Select...":
     target_data = df_f[df_f['district_name'] == sel_district]
     if page == "Financial Ledger":
-        st.subheader(f"📍 Ledger: {sel_district}")
-        st.dataframe(get_formatted_matrix(target_data), use_container_width=True)
+        st.subheader(f"📍 Financial Ledger: {sel_district}")
+        st.dataframe(target_data, use_container_width=True)
     else:
         target_cds = target_data['cds_code'].iloc[0]
         rev_data = fetch_table(f"revenue?cds_code=eq.{target_cds}")
