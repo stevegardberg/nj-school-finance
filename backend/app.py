@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import pandas as pd
 
-st.set_page_config(layout="wide")
+st.set_page_config(layout="wide", page_title="NJ School Finance Intelligence")
 
 # 1. SETUP
 headers = {"apikey": st.secrets["headers"]["apikey"], "Authorization": st.secrets["headers"]["Authorization"]}
@@ -19,60 +19,57 @@ def fetch_table(table):
         page += 1
     return pd.DataFrame(all_records)
 
-# 2. DYNAMIC LOAD & MERGE
 @st.cache_data(ttl=3600)
 def get_data():
     df_sum = fetch_table("state_aid_summary")
     df_map = fetch_table("legislative_mapping")
     df_types = fetch_table("vw_district_cohorts")
 
-    # Standardize all potential CDS column names to 'cds_code'
     for df in [df_sum, df_map, df_types]:
-        # Handle cases where 'cds' or 'cds_code' might exist
-        col_name = 'cds' if 'cds' in df.columns else 'cds_code'
-        if col_name in df.columns:
-            df.rename(columns={col_name: 'cds_code'}, inplace=True)
+        col = 'cds' if 'cds' in df.columns else 'cds_code'
+        if col in df.columns:
+            df.rename(columns={col: 'cds_code'}, inplace=True)
             df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
 
-    # Perform Inner Join to ensure valid records only
-    df_merged = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
-    df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
-
-    # Ensure defaults
-    df_merged['county_name'] = df_merged.get('county_name', 'Unassigned')
-    df_merged['district_name'] = df_merged.get('district_name', 'Unknown')
+    # Perform Merge
+    df = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
+    df = df.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
     
-    return df_merged
+    # Force string for filtering
+    df['district_name'] = df['district_name'].astype(str).str.strip()
+    return df
 
-# 3. METRIC ENFORCEMENT
+# Metrics Calculation
 def add_metrics(df):
     numeric_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
                     'equalized_valuation', 'local_fair_share', 'district_income']
     for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    
-    df = df.sort_values(['district_name', 'fiscal_year'])
+        if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     return df
 
-# 4. DYNAMIC UI CONSTRUCTION
+# UI
 df_merged = add_metrics(get_data())
 
-st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
+st.sidebar.header("Filter Settings")
+sel_ld = st.sidebar.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().astype(str).tolist()))
+sel_type = st.sidebar.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].dropna().unique().astype(str).tolist()))
+sel_county = st.sidebar.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].fillna('Unassigned').unique().astype(str).tolist()))
 
-# Dynamic Filter Logic: Everything derives from the available data
-c1, c2, c3, c4 = st.columns(4)
-
-sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().astype(str).tolist()))
-sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].dropna().unique().astype(str).tolist()))
-sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].dropna().unique().astype(str).tolist()))
-
-# Apply filters sequentially to narrow down valid district choices
+# Apply filters
 df_f = df_merged.copy()
 if sel_ld != "All": df_f = df_f[df_f['ld_display'].astype(str) == sel_ld]
 if sel_type != "All": df_f = df_f[df_f['district_type'].astype(str) == sel_type]
 if sel_county != "All": df_f = df_f[df_f['county_name'].astype(str) == sel_county]
 
-sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().astype(str).tolist()))
+sel_district = st.sidebar.selectbox("4️⃣ Select District:", ["Select..."] + sorted(df_f['district_name'].unique().tolist()))
 
-# Data display logic follows (same as previous)
+if sel_district != "Select...":
+    target_data = df_f[df_f['district_name'] == sel_district]
+    
+    if not target_data.empty:
+        st.subheader(f"📍 Financial Ledger: {sel_district}")
+        st.dataframe(target_data, use_container_width=True)
+    else:
+        st.warning(f"No data found for {sel_district}. CDS Mapping: {df_f[df_f['district_name'] == sel_district]['cds_code'].unique()}")
+else:
+    st.info("Please select a district to view the ledger.")
