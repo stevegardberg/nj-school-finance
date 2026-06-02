@@ -19,7 +19,7 @@ def fetch_table(table):
         page += 1
     return pd.DataFrame(all_records)
 
-# 2. LOAD DATA
+# 2. LOAD & MERGE
 @st.cache_data(ttl=3600)
 def get_data():
     df_sum = fetch_table("state_aid_summary")
@@ -31,14 +31,20 @@ def get_data():
         if "cds_code" in df.columns:
             df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
 
-    # Merges
+    # Perform Merge with Defensive Column Checking
     df = df_sum.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
-    df = df.merge(df_types[['cds_code', 'district_type', 'district_name']], on='cds_code', how='left')
     
-    # Data Cleaning
-    df['district_name'] = df['district_name_y'].fillna(df['district_name_x'])
+    # Only select columns that exist in the fetched metadata table
+    required_cols = ['cds_code', 'district_type', 'district_name']
+    available_cols = [c for c in required_cols if c in df_types.columns]
+    
+    if len(available_cols) > 0:
+        df = df.merge(df_types[available_cols], on='cds_code', how='left')
+    
+    # Fill missing values to prevent downstream errors
+    df['district_name'] = df['district_name'].fillna('Unknown')
     df['county_name'] = df['county_name'].fillna('Unassigned')
-    df['district_type'] = df['district_type'].fillna('Unknown')
+    df['district_type'] = df.get('district_type', 'Unknown')
     return df
 
 # 3. METRICS & FORMATTING
@@ -46,7 +52,7 @@ def add_metrics(df):
     potential_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
                       'equalized_valuation', 'local_fair_share', 'district_income']
     for col in potential_cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     
     df = df.sort_values(['district_name', 'fiscal_year'])
     df['Pct_Change_Aid'] = df.groupby('district_name')['actual_state_aid'].pct_change().fillna(0)
@@ -74,8 +80,8 @@ st.title("🏛️ New Jersey School Finance Intelligence Platform")
 
 c1, c2, c3, c4 = st.columns(4)
 sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().astype(str).tolist()))
-sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].dropna().unique().tolist()))
-sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].dropna().unique().tolist()))
+sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].dropna().unique().astype(str).tolist()))
+sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].dropna().unique().astype(str).tolist()))
 
 df_f = df_merged.copy()
 if sel_ld != "All": df_f = df_f[df_f['ld_display'].astype(str) == sel_ld]
@@ -97,7 +103,6 @@ if sel_district != "Select...":
         st.subheader(f"🧮 Revenue Matrix: {sel_district}")
         rev_data = fetch_table(f"revenue?cds_code=eq.{target_cds}")
         if not rev_data.empty:
-            pivot = rev_data.pivot_table(index='fiscal_year', columns='line_desc', values='amount', aggfunc='sum')
-            st.dataframe(pivot, use_container_width=True)
+            st.dataframe(rev_data.pivot_table(index='fiscal_year', columns='line_desc', values='amount', aggfunc='sum'), use_container_width=True)
         else:
             st.info(f"No revenue data found for CDS {target_cds}.")
