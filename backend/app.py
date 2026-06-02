@@ -35,8 +35,11 @@ def get_data():
     df = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
     df = df.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
     
-    # Force string for filtering
-    df['district_name'] = df['district_name'].astype(str).str.strip()
+    # Fill defaults
+    df['district_name'] = df['district_name'].fillna('Unknown')
+    df['county_name'] = df['county_name'].fillna('Unassigned')
+    df['district_type'] = df['district_type'].fillna('Unknown')
+    
     return df
 
 # Metrics Calculation
@@ -47,13 +50,13 @@ def add_metrics(df):
         if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     return df
 
-# UI
+# UI Setup
 df_merged = add_metrics(get_data())
 
 st.sidebar.header("Filter Settings")
 sel_ld = st.sidebar.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().astype(str).tolist()))
-sel_type = st.sidebar.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].dropna().unique().astype(str).tolist()))
-sel_county = st.sidebar.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].fillna('Unassigned').unique().astype(str).tolist()))
+sel_type = st.sidebar.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].unique().astype(str).tolist()))
+sel_county = st.sidebar.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].unique().astype(str).tolist()))
 
 # Apply filters
 df_f = df_merged.copy()
@@ -61,15 +64,27 @@ if sel_ld != "All": df_f = df_f[df_f['ld_display'].astype(str) == sel_ld]
 if sel_type != "All": df_f = df_f[df_f['district_type'].astype(str) == sel_type]
 if sel_county != "All": df_f = df_f[df_f['county_name'].astype(str) == sel_county]
 
-sel_district = st.sidebar.selectbox("4️⃣ Select District:", ["Select..."] + sorted(df_f['district_name'].unique().tolist()))
+# Safe district selection
+districts = sorted(df_f['district_name'].unique().astype(str).tolist())
+sel_district = st.sidebar.selectbox("4️⃣ Select District:", ["Select..."] + districts)
+
+# Page Layout
+page = st.sidebar.radio("Navigation", ["Financial Ledger", "Revenue Matrix"])
 
 if sel_district != "Select...":
     target_data = df_f[df_f['district_name'] == sel_district]
     
     if not target_data.empty:
-        st.subheader(f"📍 Financial Ledger: {sel_district}")
-        st.dataframe(target_data, use_container_width=True)
+        if page == "Financial Ledger":
+            st.title(f"📍 Financial Ledger: {sel_district}")
+            st.dataframe(target_data, use_container_width=True)
+        elif page == "Revenue Matrix":
+            st.title(f"🧮 Revenue Matrix: {sel_district}")
+            target_cds = target_data['cds_code'].iloc[0]
+            rev_data = fetch_table(f"revenue?cds_code=eq.{target_cds}")
+            if not rev_data.empty:
+                st.dataframe(rev_data.pivot_table(index='fiscal_year', columns='line_desc', values='amount', aggfunc='sum'), use_container_width=True)
+            else:
+                st.info("No revenue data found for this district.")
     else:
-        st.warning(f"No data found for {sel_district}. CDS Mapping: {df_f[df_f['district_name'] == sel_district]['cds_code'].unique()}")
-else:
-    st.info("Please select a district to view the ledger.")
+        st.warning("No data found for the selected filter combination.")
