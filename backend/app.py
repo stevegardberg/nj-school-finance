@@ -14,8 +14,12 @@ def fetch_table(table):
     page = 0
     while True:
         res = requests.get(f"{BASE_URL}/{table}?limit=1000&offset={page*1000}", headers=headers)
-        if res.status_code != 200 or not res.json(): break
-        all_records.extend(res.json())
+        if res.status_code != 200:
+            st.error(f"Error fetching {table}: Status {res.status_code}")
+            return pd.DataFrame()
+        data = res.json()
+        if not data: break
+        all_records.extend(data)
         page += 1
     return pd.DataFrame(all_records)
 
@@ -23,38 +27,41 @@ def fetch_table(table):
 def get_data():
     df_sum = fetch_table("state_aid_summary")
     df_map = fetch_table("legislative_mapping")
-    df_types = fetch_table("district_metadata_mapping")
+    df_meta = fetch_table("district_metadata_mapping")
+    
+    if df_sum.empty: return pd.DataFrame()
 
-    for df in [df_sum, df_map, df_types]:
+    # Standardize keys
+    for df in [df_sum, df_map, df_meta]:
         if "cds_code" in df.columns:
             df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
 
-    df_merged = df_sum.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
+    # Merges
+    df = df_sum.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
     
     required_meta = ['cds_code', 'district_type', 'district_name']
-    if all(col in df_types.columns for col in required_meta):
-        df_merged = df_merged.merge(df_types[required_meta], on='cds_code', how='left')
+    if all(col in df_meta.columns for col in required_meta):
+        df = df.merge(df_meta[required_meta], on='cds_code', how='left')
     else:
-        df_merged['district_type'] = 'Unknown'
-        df_merged['district_name'] = 'Unknown'
+        df['district_type'] = 'Unknown'
+        df['district_name'] = 'Unknown'
 
+    # Ensure columns exist and fill NaNs
     for col, default in [('district_type', 'Unknown'), ('district_name', 'Unknown'), 
                          ('county_name', 'Unassigned'), ('ld_display', 'N/A')]:
-        if col not in df_merged.columns:
-            df_merged[col] = default
-        else:
-            df_merged[col] = df_merged[col].fillna(default)
+        if col not in df.columns: df[col] = default
+        else: df[col] = df[col].fillna(default)
             
-    df_merged['display_name'] = df_merged['district_name'].astype(str) + " (" + df_merged['county_name'].astype(str) + ")"
-    return df_merged
+    df['display_name'] = df['district_name'].astype(str) + " (" + df['county_name'].astype(str) + ")"
+    return df
 
 def add_metrics(df):
     df = df.sort_values(['district_name', 'fiscal_year'])
     numeric_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
                     'equalized_valuation', 'local_fair_share', 'district_income']
     for col in numeric_cols:
-        if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+    
     df['Pct_Change_Aid'] = df.groupby('district_name')['actual_state_aid'].pct_change().fillna(0)
     df['Pct_Change_Levy'] = df.groupby('district_name')['actual_tax_levy'].pct_change().fillna(0)
     df['Over_Under_Funded'] = df['actual_state_aid'] - df['uncapped_aid']
@@ -79,25 +86,35 @@ def get_formatted_matrix(df):
             df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if '%' not in col and 'per $100' not in col.lower() else (f"{float(x):.2%}" if '%' in col else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"{float(x):,.0f}")))
     return df_out
 
-df_merged = add_metrics(get_data())
+# UI Execution
+df_raw = get_data()
+if df_raw.empty:
+    st.warning("No data loaded. Check Supabase connection and table names.")
+    st.stop()
+
+df_merged = add_metrics(df_raw)
 
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
 c1, c2, c3, c4 = st.columns(4)
 sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().tolist()))
 sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].unique().tolist()))
 sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].unique().tolist()))
+
 df_f = df_merged.copy()
 if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
 if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
 if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
+
 sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['display_name'].unique().tolist()))
 
 if sel_district != "Select...":
    target_data = df_f[df_f['display_name'] == sel_district]
    st.subheader(f"📍 Financial Ledger: {sel_district}")
    st.dataframe(get_formatted_matrix(target_data), use_container_width=True, hide_index=True)
+   
    ld_val = target_data['ld_display'].iloc[0] if 'ld_display' in target_data.columns else None
    type_val = target_data['district_type'].iloc[0] if 'district_type' in target_data.columns else None
+   
    for name, group_col, val in [("Legislative District", 'ld_display', ld_val), ("District Type", 'district_type', type_val)]:
        if val and val != "Unknown":
            st.markdown("---")
