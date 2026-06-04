@@ -23,57 +23,44 @@ def fetch_table(table):
 
 @st.cache_data(ttl=3600)
 def get_data():
-    df = fetch_table("state_aid_summary")
-    if df.empty: return pd.DataFrame()
-    df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
-
-    # Legislative
+    # Fetch tables
+    df_sum = fetch_table("state_aid_summary")
     df_map = fetch_table("legislative_mapping")
-    if not df_map.empty:
-        df_map["cds_code"] = df_map["cds_code"].astype(str).str.strip().str.zfill(6)
-        df = df.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
-    
-    # Metadata
     df_meta = fetch_table("district_metadata_mapping")
-    if not df_meta.empty:
-        df_meta["cds_code"] = df_meta["cds_code"].astype(str).str.strip().str.zfill(6)
-        df = df.merge(df_meta[['cds_code', 'district_type']], on='cds_code', how='left')
-
-    # Guaranteed column initialization
-    defaults = {
-        'district_type': 'Unknown',
-        'county_name': 'Unassigned',
-        'ld_display': 'N/A',
-        'district_name': 'Unknown District'
-    }
     
-    for col, default in defaults.items():
-        if col not in df.columns:
-            df[col] = default
-        else:
-            df[col] = df[col].fillna(default)
-            
+    if df_sum.empty: return pd.DataFrame()
+
+    # Standardize CDS Codes (Pad to 6 digits)
+    for df in [df_sum, df_map, df_meta]:
+        if "cds_code" in df.columns:
+            df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
+
+    # Merge process
+    df = df_sum.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
+    df = df.merge(df_meta[['cds_code', 'district_type', 'district_name']], on='cds_code', how='left', suffixes=('', '_meta'))
+    
+    # Consolidate Name/Type from Meta if available
+    df['district_name'] = df['district_name'].combine_first(df.get('district_name_meta', pd.Series()))
+    
+    # Force fills to prevent "Unassigned" labels
+    df['district_type'] = df['district_type'].fillna('Unknown Type')
+    df['county_name'] = df['county_name'].fillna('Unknown County')
+    df['ld_display'] = df['ld_display'].fillna('N/A')
+    
+    # Create Display Label
     df['display_name'] = df['district_name'].astype(str) + " (" + df['county_name'].astype(str) + ")"
     return df
 
 def add_metrics(df):
-    df = df.sort_values(['district_name', 'fiscal_year'])
     numeric_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
                     'equalized_valuation', 'local_fair_share', 'district_income']
     for col in numeric_cols:
         if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    
-    df['Pct_Change_Aid'] = df.groupby('district_name')['actual_state_aid'].pct_change().fillna(0)
-    df['Pct_Change_Levy'] = df.groupby('district_name')['actual_tax_levy'].pct_change().fillna(0)
-    df['Over_Under_Funded'] = df['actual_state_aid'] - df['uncapped_aid']
-    df['Over_Under_LFS'] = df['actual_tax_levy'] - df['local_fair_share']
-    df['Tax_Levy_per_100'] = (df['actual_tax_levy'] / df['equalized_valuation'].replace(0, 1)) * 100
     return df
 
 def get_formatted_matrix(df):
     rename_map = {'fiscal_year': 'Fiscal Year', 'actual_state_aid': 'Actual Aid', 'actual_tax_levy': 'Actual Levy'}
-    df_out = df.rename(columns=rename_map)
-    return df_out
+    return df.rename(columns=rename_map)
 
 # UI Execution
 df_merged = add_metrics(get_data())
@@ -81,19 +68,28 @@ df_merged = add_metrics(get_data())
 st.markdown("### 🏛️ NJ School Finance Intelligence")
 
 if df_merged.empty:
-    st.error("Data is empty. Please check your Supabase tables.")
+    st.error("No data found! Check Supabase tables.")
 else:
     c1, c2, c3, c4 = st.columns(4)
-    sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().tolist()))
-    sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].unique().tolist()))
-    sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].unique().tolist()))
+    
+    # Create clean dropdown lists excluding 'Unknown' or 'N/A'
+    ld_opts = ["All"] + sorted([x for x in df_merged['ld_display'].unique() if x and x != 'N/A'])
+    type_opts = ["All"] + sorted([x for x in df_merged['district_type'].unique() if x and x != 'Unknown Type'])
+    county_opts = ["All"] + sorted([x for x in df_merged['county_name'].unique() if x and x != 'Unknown County'])
 
+    sel_ld = c1.selectbox("1️⃣ Legislative:", ld_opts)
+    sel_type = c2.selectbox("2️⃣ District Type:", type_opts)
+    sel_county = c3.selectbox("3️⃣ County:", county_opts)
+
+    # Filter
     df_f = df_merged.copy()
     if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
     if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
     if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
 
-    sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['display_name'].unique().tolist()))
+    # Populate 4th dropdown
+    districts = ["Select..."] + sorted(df_f['display_name'].dropna().unique().tolist())
+    sel_district = c4.selectbox("4️⃣ District:", options=districts)
 
     if sel_district != "Select...":
        target_data = df_f[df_f['display_name'] == sel_district]
