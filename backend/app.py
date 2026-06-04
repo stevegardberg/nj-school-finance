@@ -2,14 +2,11 @@ import streamlit as st
 import requests
 import pandas as pd
 
-
 st.set_page_config(layout="wide")
-
 
 # 1. SETUP
 headers = {"apikey": st.secrets["headers"]["apikey"], "Authorization": st.secrets["headers"]["Authorization"]}
 BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
-
 
 @st.cache_data(ttl=3600)
 def fetch_table(table):
@@ -22,35 +19,34 @@ def fetch_table(table):
        page += 1
    return pd.DataFrame(all_records)
 
-
-# 2. LOAD & MERGE (Robust handling)
+# 2. LOAD & MERGE
 @st.cache_data(ttl=3600)
 def get_data():
    df_sum = fetch_table("state_aid_summary")
    df_map = fetch_table("legislative_mapping")
-   df_types = fetch_table("vw_district_cohorts")
-
+   df_types = fetch_table("district_metadata_mapping")
 
    for df in [df_sum, df_map, df_types]:
        if "cds_code" in df.columns:
            df["cds_code"] = df["cds_code"].astype(str).str.zfill(6)
 
-
    # Merge legislative mapping safely
-   df_merged = df_sum.merge(df_map[['cds_code', 'ld_display']], on='cds_code', how='left')
+   df_merged = df_sum.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
   
-   # Only merge cohort data if columns exist (prevents KeyError)
+   # Merge metadata
    if 'cds_code' in df_types.columns and 'district_type' in df_types.columns:
-       df_merged = df_merged.merge(df_types[['cds_code', 'district_type']], on='cds_code', how='left')
+       df_merged = df_merged.merge(df_types[['cds_code', 'district_type', 'district_name']], on='cds_code', how='left')
    else:
        df_merged['district_type'] = 'Unknown'
-
+       df_merged['district_name'] = 'Unknown'
 
    if 'county_name' not in df_merged.columns:
        df_merged['county_name'] = 'Unassigned'
+       
+   # CREATE DISPLAY LABEL TO DISAMBIGUATE DUPLICATE NAMES
+   df_merged['display_name'] = df_merged['district_name'].astype(str) + " (" + df_merged['county_name'].astype(str) + ")"
   
    return df_merged
-
 
 # 3. CALCULATIONS
 def add_metrics(df):
@@ -70,7 +66,6 @@ def add_metrics(df):
    df['Tax_Levy_per_100'] = (df['actual_tax_levy'] / df['equalized_valuation'].replace(0, 1)) * 100
    return df
 
-
 # 4. FORMATTING
 def get_formatted_matrix(df):
    col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded',
@@ -89,10 +84,8 @@ def get_formatted_matrix(df):
            df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if '%' not in col and 'per $100' not in col.lower() else (f"{float(x):.2%}" if '%' in col else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"{float(x):,.0f}")))
    return df_out
 
-
 # 5. UI
 df_merged = add_metrics(get_data())
-
 
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
 c1, c2, c3, c4 = st.columns(4)
@@ -100,18 +93,15 @@ sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_dis
 sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].dropna().unique().tolist()))
 sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].dropna().unique().tolist()))
 
-
 df_f = df_merged.copy()
 if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
 if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
 if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
 
-
-sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].dropna().unique().tolist()))
-
+sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['display_name'].dropna().unique().tolist()))
 
 if sel_district != "Select...":
-   target_data = df_f[df_f['district_name'] == sel_district]
+   target_data = df_f[df_f['display_name'] == sel_district]
    st.subheader(f"📍 Financial Ledger: {sel_district}")
    st.dataframe(get_formatted_matrix(target_data), use_container_width=True, hide_index=True)
   
@@ -125,4 +115,3 @@ if sel_district != "Select...":
            peers = df_merged[df_merged[group_col] == val].copy()
            avg = add_metrics(peers).groupby('fiscal_year').mean(numeric_only=True).reset_index()
            st.dataframe(get_formatted_matrix(avg), use_container_width=True, hide_index=True)
-
