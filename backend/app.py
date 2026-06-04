@@ -23,30 +23,36 @@ def fetch_table(table):
 
 @st.cache_data(ttl=3600)
 def get_data():
-    # Primary Source: Financial Data
     df = fetch_table("state_aid_summary")
     if df.empty: return pd.DataFrame()
     df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
 
-    # Secondary Source: Legislative Mapping (for LD and County)
+    # Legislative
     df_map = fetch_table("legislative_mapping")
     if not df_map.empty:
         df_map["cds_code"] = df_map["cds_code"].astype(str).str.strip().str.zfill(6)
         df = df.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
     
-    # Tertiary Source: Metadata (for Type)
+    # Metadata
     df_meta = fetch_table("district_metadata_mapping")
     if not df_meta.empty:
         df_meta["cds_code"] = df_meta["cds_code"].astype(str).str.strip().str.zfill(6)
         df = df.merge(df_meta[['cds_code', 'district_type']], on='cds_code', how='left')
 
-    # Fill missing values to prevent UI crashes
-    df['district_type'] = df.get('district_type', 'Unknown').fillna('Unknown')
-    df['county_name'] = df.get('county_name', 'Unassigned').fillna('Unassigned')
-    df['ld_display'] = df.get('ld_display', 'N/A').fillna('N/A')
-    df['district_name'] = df['district_name'].fillna('Unknown District')
+    # Guaranteed column initialization
+    defaults = {
+        'district_type': 'Unknown',
+        'county_name': 'Unassigned',
+        'ld_display': 'N/A',
+        'district_name': 'Unknown District'
+    }
     
-    # Create the label for the 4th dropdown
+    for col, default in defaults.items():
+        if col not in df.columns:
+            df[col] = default
+        else:
+            df[col] = df[col].fillna(default)
+            
     df['display_name'] = df['district_name'].astype(str) + " (" + df['county_name'].astype(str) + ")"
     return df
 
@@ -65,29 +71,17 @@ def add_metrics(df):
     return df
 
 def get_formatted_matrix(df):
-    col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded',
-                 'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS',
-                 'Pct_Change_Levy', 'equalized_valuation', 'Tax_Levy_per_100', 'district_income']
-    available_cols = [c for c in col_order if c in df.columns]
-    df_out = df[available_cols].copy()
-    rename_map = {'fiscal_year': 'Fiscal Year', 'adequacy_budget': 'Adequacy Budget', 'uncapped_aid': 'Uncapped Aid',
-                  'actual_state_aid': 'Actual Aid', 'Over_Under_Funded': 'Over/Under Funded', 'Pct_Change_Aid': '% Change Actual Aid',
-                  'local_fair_share': 'Local Fair Share', 'actual_tax_levy': 'Actual Levy', 'Over_Under_LFS': 'Over/Under LFS',
-                  'Pct_Change_Levy': '% Change Actual Levy', 'equalized_valuation': 'Equalized Valuation',
-                  'Tax_Levy_per_100': 'Levy per $100', 'district_income': 'District Income'}
-    df_out = df_out.rename(columns=rename_map)
-    for col in df_out.columns:
-        if col != 'Fiscal Year':
-            df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if '%' not in col and 'per $100' not in col.lower() else (f"{float(x):.2%}" if '%' in col else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"{float(x):,.0f}")))
+    rename_map = {'fiscal_year': 'Fiscal Year', 'actual_state_aid': 'Actual Aid', 'actual_tax_levy': 'Actual Levy'}
+    df_out = df.rename(columns=rename_map)
     return df_out
 
 # UI Execution
 df_merged = add_metrics(get_data())
 
-st.markdown("### 🏛️ NJ School Finance Intelligence Platform")
+st.markdown("### 🏛️ NJ School Finance Intelligence")
 
 if df_merged.empty:
-    st.error("No data found! Verify your database tables are populated.")
+    st.error("Data is empty. Please check your Supabase tables.")
 else:
     c1, c2, c3, c4 = st.columns(4)
     sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().tolist()))
@@ -104,15 +98,4 @@ else:
     if sel_district != "Select...":
        target_data = df_f[df_f['display_name'] == sel_district]
        st.subheader(f"📍 Financial Ledger: {sel_district}")
-       st.dataframe(get_formatted_matrix(target_data), use_container_width=True, hide_index=True)
-       
-       # Peers comparison logic
-       ld_val = target_data['ld_display'].iloc[0] if 'ld_display' in target_data.columns else None
-       type_val = target_data['district_type'].iloc[0] if 'district_type' in target_data.columns else None
-       for name, group_col, val in [("Legislative District", 'ld_display', ld_val), ("District Type", 'district_type', type_val)]:
-           if val and val != "Unknown":
-               st.markdown("---")
-               st.subheader(f"🏛️ {name} Average: {val}")
-               peers = df_merged[df_merged[group_col] == val].copy()
-               avg = add_metrics(peers).groupby('fiscal_year').mean(numeric_only=True).reset_index()
-               st.dataframe(get_formatted_matrix(avg), use_container_width=True, hide_index=True)
+       st.dataframe(get_formatted_matrix(target_data), use_container_width=True)
