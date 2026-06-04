@@ -23,35 +23,40 @@ def fetch_table(table):
 
 @st.cache_data(ttl=3600)
 def get_data():
-    # Fetch tables
     df_sum = fetch_table("state_aid_summary")
     df_map = fetch_table("legislative_mapping")
     df_meta = fetch_table("district_metadata_mapping")
     
     if df_sum.empty: return pd.DataFrame()
 
-    # Standardize CDS Codes (Pad to 6 digits)
+    # Standardize CDS Codes
     for df in [df_sum, df_map, df_meta]:
         if "cds_code" in df.columns:
             df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
 
-    # Merge process
+    # 1. Base Merge
     df = df_sum.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
-    df = df.merge(df_meta[['cds_code', 'district_type', 'district_name']], on='cds_code', how='left', suffixes=('', '_meta'))
     
-    # Consolidate Name/Type from Meta if available
-    df['district_name'] = df['district_name'].combine_first(df.get('district_name_meta', pd.Series()))
+    # 2. Schema-Aware Metadata Merge
+    required_meta = ['cds_code', 'district_type', 'district_name']
+    available_meta = [col for col in required_meta if col in df_meta.columns]
     
-    # Force fills to prevent "Unassigned" labels
-    df['district_type'] = df['district_type'].fillna('Unknown Type')
-    df['county_name'] = df['county_name'].fillna('Unknown County')
-    df['ld_display'] = df['ld_display'].fillna('N/A')
+    if len(available_meta) > 1:
+        df = df.merge(df_meta[available_meta], on='cds_code', how='left', suffixes=('', '_meta'))
     
-    # Create Display Label
+    # 3. Guaranteed column initialization to prevent crashes
+    for col, default in [('district_type', 'Unknown'), ('county_name', 'Unassigned'), 
+                         ('ld_display', 'N/A'), ('district_name', 'Unknown District')]:
+        if col not in df.columns:
+            df[col] = default
+        else:
+            df[col] = df[col].fillna(default)
+            
     df['display_name'] = df['district_name'].astype(str) + " (" + df['county_name'].astype(str) + ")"
     return df
 
 def add_metrics(df):
+    df = df.sort_values(['district_name', 'fiscal_year'])
     numeric_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
                     'equalized_valuation', 'local_fair_share', 'district_income']
     for col in numeric_cols:
@@ -68,30 +73,30 @@ df_merged = add_metrics(get_data())
 st.markdown("### 🏛️ NJ School Finance Intelligence")
 
 if df_merged.empty:
-    st.error("No data found! Check Supabase tables.")
+    st.error("No data loaded. Check Supabase table status.")
 else:
     c1, c2, c3, c4 = st.columns(4)
     
-    # Create clean dropdown lists excluding 'Unknown' or 'N/A'
+    # Filter options
     ld_opts = ["All"] + sorted([x for x in df_merged['ld_display'].unique() if x and x != 'N/A'])
-    type_opts = ["All"] + sorted([x for x in df_merged['district_type'].unique() if x and x != 'Unknown Type'])
-    county_opts = ["All"] + sorted([x for x in df_merged['county_name'].unique() if x and x != 'Unknown County'])
+    type_opts = ["All"] + sorted([x for x in df_merged['district_type'].unique() if x and x != 'Unknown'])
+    county_opts = ["All"] + sorted([x for x in df_merged['county_name'].unique() if x and x != 'Unassigned'])
 
     sel_ld = c1.selectbox("1️⃣ Legislative:", ld_opts)
     sel_type = c2.selectbox("2️⃣ District Type:", type_opts)
     sel_county = c3.selectbox("3️⃣ County:", county_opts)
 
-    # Filter
+    # Filtered dataframe
     df_f = df_merged.copy()
     if sel_ld != "All": df_f = df_f[df_f['ld_display'] == sel_ld]
     if sel_type != "All": df_f = df_f[df_f['district_type'] == sel_type]
     if sel_county != "All": df_f = df_f[df_f['county_name'] == sel_county]
 
-    # Populate 4th dropdown
-    districts = ["Select..."] + sorted(df_f['display_name'].dropna().unique().tolist())
-    sel_district = c4.selectbox("4️⃣ District:", options=districts)
+    sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['display_name'].unique().tolist()))
 
     if sel_district != "Select...":
        target_data = df_f[df_f['display_name'] == sel_district]
        st.subheader(f"📍 Financial Ledger: {sel_district}")
        st.dataframe(get_formatted_matrix(target_data), use_container_width=True)
+
+#
