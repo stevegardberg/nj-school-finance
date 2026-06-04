@@ -38,15 +38,17 @@ def get_data():
         df_merged['district_type'] = 'Unknown'
         df_merged['district_name'] = 'Unknown'
 
-    df_merged['district_type'] = df_merged['district_type'].fillna('Unknown')
-    df_merged['district_name'] = df_merged['district_name'].fillna('Unknown')
-    df_merged['county_name'] = df_merged.get('county_name', 'Unassigned').fillna('Unassigned')
-    df_merged['ld_display'] = df_merged.get('ld_display', 'N/A').fillna('N/A')
+    for col, default in [('district_type', 'Unknown'), ('district_name', 'Unknown'), 
+                         ('county_name', 'Unassigned'), ('ld_display', 'N/A')]:
+        if col not in df_merged.columns:
+            df_merged[col] = default
+        else:
+            df_merged[col] = df_merged[col].fillna(default)
+            
     df_merged['display_name'] = df_merged['district_name'].astype(str) + " (" + df_merged['county_name'].astype(str) + ")"
     return df_merged
 
 def add_metrics(df):
-    if 'district_name' not in df.columns: df['district_name'] = 'Unknown'
     df = df.sort_values(['district_name', 'fiscal_year'])
     numeric_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
                     'equalized_valuation', 'local_fair_share', 'district_income']
