@@ -25,53 +25,41 @@ def get_data():
     df_map = fetch_table("legislative_mapping")
     df_meta = fetch_table("district_metadata_mapping")
     
-    # Standardize CDS keys
+    if df_sum.empty: return pd.DataFrame()
+
     for df in [df_sum, df_map, df_meta]:
         if "cds_code" in df.columns:
             df["cds_code"] = df["cds_code"].astype(str).str.strip().str.zfill(6)
 
-    # Merge Process:
-    # 1. Base Summary + Legislative (brings in county_name, ld_display)
     df = df_sum.merge(df_map[['cds_code', 'ld_display', 'county_name']], on='cds_code', how='left')
-    
-    # 2. Merge + Metadata (brings in district_type)
-    if 'cds_code' in df_meta.columns:
-        df = df.merge(df_meta[['cds_code', 'district_type']], on='cds_code', how='left')
+    df = df.merge(df_meta[['cds_code', 'district_type']], on='cds_code', how='left')
 
-    # Force initialization of UI columns to prevent 'Unassigned' or empty dropdowns
-    df['district_type'] = df.get('district_type', 'Unknown Type').fillna('Unknown Type')
-    df['county_name'] = df.get('county_name', 'Unknown County').fillna('Unknown County')
-    df['ld_display'] = df.get('ld_display', 'N/A').fillna('N/A')
-    df['district_name'] = df['district_name'].fillna('Unknown District')
-    
+    defaults = {'district_type': 'Unknown Type', 'county_name': 'Unknown County', 'ld_display': 'N/A', 'district_name': 'Unknown District'}
+    for col, default_val in defaults.items():
+        if col not in df.columns: df[col] = default_val
+        else: df[col] = df[col].fillna(default_val)
+            
     return df
 
 def add_metrics(df):
     df = df.sort_values(['district_name', 'fiscal_year'])
-    numeric_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
-                    'equalized_valuation', 'local_fair_share', 'district_income']
+    numeric_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy', 'equalized_valuation', 'local_fair_share', 'district_income']
     for col in numeric_cols:
         if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    df['Pct_Change_Aid'] = df.groupby('district_name')['actual_state_aid'].pct_change().fillna(0)
-    df['Pct_Change_Levy'] = df.groupby('district_name')['actual_tax_levy'].pct_change().fillna(0)
-    df['Over_Under_Funded'] = df['actual_state_aid'] - df['uncapped_aid']
-    df['Over_Under_LFS'] = df['actual_tax_levy'] - df['local_fair_share']
-    df['Tax_Levy_per_100'] = (df['actual_tax_levy'] / df['equalized_valuation'].replace(0, 1)) * 100
     return df
 
 def get_formatted_matrix(df):
     rename_map = {'fiscal_year': 'Fiscal Year', 'actual_state_aid': 'Actual Aid', 'actual_tax_levy': 'Actual Levy'}
     return df.rename(columns=rename_map)
 
-# UI
+# UI Execution
 df_merged = add_metrics(get_data())
-st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
 
+st.markdown("### 🏛️ NJ School Finance Intelligence")
 if df_merged.empty:
-    st.error("No data loaded. Check your Supabase tables.")
+    st.error("No data loaded.")
 else:
     c1, c2, c3, c4 = st.columns(4)
-    # Filter dropdowns populated from full dataset
     sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].unique().tolist()))
     sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].unique().tolist()))
     sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].unique().tolist()))
@@ -84,5 +72,4 @@ else:
     sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + sorted(df_f['district_name'].unique().tolist()))
 
     if sel_district != "Select...":
-       st.subheader(f"📍 Financial Ledger: {sel_district}")
        st.dataframe(get_formatted_matrix(df_f[df_f['district_name'] == sel_district]), use_container_width=True)
