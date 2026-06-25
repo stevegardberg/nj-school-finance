@@ -1,0 +1,41 @@
+import streamlit as st
+import requests
+import pandas as pd
+
+st.set_page_config(layout="wide", page_title="NJ Finance Dashboard")
+
+headers = {
+    "apikey": st.secrets["headers"]["apikey"], 
+    "Authorization": st.secrets["headers"]["Authorization"]
+}
+BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
+
+@st.cache_data(ttl=3600)
+def fetch_view(view_name):
+    url = f"{BASE_URL}/{view_name}"
+    res = requests.get(url, headers=headers)
+    
+    # Capture raw data
+    raw_data = res.json()
+    
+    # DEBUG: Show us what is actually coming back
+    if res.status_code != 200 or not isinstance(raw_data, list):
+        st.error(f"Debug: {view_name} returned status {res.status_code}")
+        st.write("Raw API Response:", raw_data)
+        return pd.DataFrame()
+        
+    return pd.DataFrame(raw_data)
+
+# LOAD DATA
+rev_df = fetch_view("v_unified_revenue")
+appr_df = fetch_view("v_unified_appropriations")
+types_df = fetch_view("vw_district_cohorts")
+
+# UI
+st.header("🏛️ Financial Intelligence Explorer")
+
+if rev_df.empty:
+    st.warning("No revenue data loaded. Check the debug messages above.")
+else:
+    # ... (rest of your existing UI logic)
+    st.success(f"Loaded {len(rev_df)} records.")
