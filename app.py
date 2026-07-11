@@ -26,7 +26,8 @@ def get_data():
     df_types = fetch_table("vw_district_cohorts")
 
     df_merged = df_sum.merge(df_map[['cds', 'ld_display']], on='cds', how='left')
-    df_merged = df_merged.merge(df_types[['cds', 'district_type']], on='cds', how='left')
+print(df_types.columns)
+df_merged = df_merged.merge(df_types[['cds', 'district_type']], on='cds', how='left')
     
     if 'county_name' not in df_merged.columns: df_merged['county_name'] = 'Unassigned'
     return df_merged
