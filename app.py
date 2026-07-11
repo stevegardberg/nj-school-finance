@@ -25,11 +25,24 @@ def get_data():
     df_map = fetch_table("legislative_mapping")
     df_types = fetch_table("vw_district_cohorts")
 
+    # Ensure column names are lowercase for consistent merging
+    df_sum.columns = df_sum.columns.str.lower()
+    df_map.columns = df_map.columns.str.lower()
+    df_types.columns = df_types.columns.str.lower()
+
+    # Perform merges
     df_merged = df_sum.merge(df_map[['cds', 'ld_display']], on='cds', how='left')
-print(df_types.columns)
-df_merged = df_merged.merge(df_types[['cds', 'district_type']], on='cds', how='left')
     
-    if 'county_name' not in df_merged.columns: df_merged['county_name'] = 'Unassigned'
+    # Defensive merge for district types
+    if 'cds' in df_types.columns and 'district_type' in df_types.columns:
+        df_merged = df_merged.merge(df_types[['cds', 'district_type']], on='cds', how='left')
+    else:
+        st.error(f"Merge error: Expected ['cds', 'district_type'] in df_types, but found {df_types.columns.tolist()}")
+        df_merged['district_type'] = 'Unknown'
+    
+    if 'county_name' not in df_merged.columns: 
+        df_merged['county_name'] = 'Unassigned'
+        
     return df_merged
 
 def add_metrics(df):
@@ -39,7 +52,8 @@ def add_metrics(df):
     num_cols = ['actual_state_aid', 'uncapped_aid', 'adequacy_budget', 'actual_tax_levy',
                 'equalized_valuation', 'local_fair_share', 'district_income']
     for col in num_cols:
-        if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        if col in df.columns: 
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
     
     df['Pct_Change_Aid'] = df.groupby('district_name')['actual_state_aid'].pct_change().fillna(0)
     df['Pct_Change_Levy'] = df.groupby('district_name')['actual_tax_levy'].pct_change().fillna(0)
