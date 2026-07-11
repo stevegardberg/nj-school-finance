@@ -25,23 +25,27 @@ def get_data():
     df_map = fetch_table("legislative_mapping")
     df_types = fetch_table("vw_district_cohorts")
 
-    # Ensure column names are lowercase for consistent merging
+    # Standardize to lowercase
     df_sum.columns = df_sum.columns.str.lower()
     df_map.columns = df_map.columns.str.lower()
     df_types.columns = df_types.columns.str.lower()
 
+    # Map mapping variations to standard names
+    if 'cds_code' in df_map.columns: df_map = df_map.rename(columns={'cds_code': 'cds'})
+    if 'cds_code' in df_types.columns: df_types = df_types.rename(columns={'cds_code': 'cds'})
+
+    # Ensure CDS is a string to prevent merge mismatches
+    df_sum['cds'] = df_sum['cds'].astype(str)
+    df_map['cds'] = df_map['cds'].astype(str)
+    df_types['cds'] = df_types['cds'].astype(str)
+
     # Perform merges
     df_merged = df_sum.merge(df_map[['cds', 'ld_display']], on='cds', how='left')
+    df_merged = df_merged.merge(df_types[['cds', 'district_type']], on='cds', how='left')
     
-    # Defensive merge for district types
-    if 'cds' in df_types.columns and 'district_type' in df_types.columns:
-        df_merged = df_merged.merge(df_types[['cds', 'district_type']], on='cds', how='left')
-    else:
-        st.error(f"Merge error: Expected ['cds', 'district_type'] in df_types, but found {df_types.columns.tolist()}")
-        df_merged['district_type'] = 'Unknown'
-    
-    if 'county_name' not in df_merged.columns: 
-        df_merged['county_name'] = 'Unassigned'
+    # Fill missing identifiers
+    if 'county_name' not in df_merged.columns: df_merged['county_name'] = 'Unassigned'
+    if 'district_type' not in df_merged.columns: df_merged['district_type'] = 'Unknown'
         
     return df_merged
 
