@@ -107,35 +107,65 @@ def get_formatted_matrix(df):
             df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if '%' not in col and 'per $100' not in col.lower() else (f"{float(x):.2%}" if '%' in col else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"${float(x):,.0f}")))
     return df_out
 
+# Load data
 df_merged = add_metrics(get_data())
-st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
+
+# Sidebar Navigation
+st.sidebar.title("Navigation")
+app_mode = st.sidebar.selectbox("Choose View", [
+    "District Financial Ledger", 
+    "District Type Trends", 
+    "Legislative District Trends"
+])
 
 if not df_merged.empty:
-    c1, c2, c3, c4 = st.columns(4)
-    sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().tolist())) if 'ld_display' in df_merged.columns else "All"
-    sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].dropna().unique().tolist())) if 'district_type' in df_merged.columns else "All"
-    sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].dropna().unique().tolist())) if 'county_name' in df_merged.columns else "All"
+    if app_mode == "District Financial Ledger":
+        st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
+        c1, c2, c3, c4 = st.columns(4)
+        sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().tolist())) if 'ld_display' in df_merged.columns else "All"
+        sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].dropna().unique().tolist())) if 'district_type' in df_merged.columns else "All"
+        sel_county = c3.selectbox("3️⃣ County:", ["All"] + sorted(df_merged['county_name'].dropna().unique().tolist())) if 'county_name' in df_merged.columns else "All"
 
-    df_f = df_merged.copy()
-    if sel_ld != "All" and 'ld_display' in df_f.columns: df_f = df_f[df_f['ld_display'] == sel_ld]
-    if sel_type != "All" and 'district_type' in df_f.columns: df_f = df_f[df_f['district_type'] == sel_type]
-    if sel_county != "All" and 'county_name' in df_f.columns: df_f = df_f[df_f['county_name'] == sel_county]
-    
-    districts = sorted(df_f['district_name'].dropna().unique().tolist()) if 'district_name' in df_f.columns else []
-    sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + districts)
+        df_f = df_merged.copy()
+        if sel_ld != "All" and 'ld_display' in df_f.columns: df_f = df_f[df_f['ld_display'] == sel_ld]
+        if sel_type != "All" and 'district_type' in df_f.columns: df_f = df_f[df_f['district_type'] == sel_type]
+        if sel_county != "All" and 'county_name' in df_f.columns: df_f = df_f[df_f['county_name'] == sel_county]
+        
+        districts = sorted(df_f['district_name'].dropna().unique().tolist()) if 'district_name' in df_f.columns else []
+        sel_district = c4.selectbox("4️⃣ District:", ["Select..."] + districts)
 
-    if sel_district != "Select...":
-        target = df_f[df_f['district_name'] == sel_district]
-        st.subheader(f"📍 Financial Ledger: {sel_district}")
-        st.dataframe(get_formatted_matrix(target), use_container_width=True, hide_index=True)
-        for name, group_col, val in [("Legislative District", 'ld_display', target['ld_display'].iloc[0] if 'ld_display' in target.columns and not target.empty else None),  
-                                   ("District Type", 'district_type', target['district_type'].iloc[0] if 'district_type' in target.columns and not target.empty else None)]:
-            if val and val != "Unknown":
-                st.markdown("---")
-                st.subheader(f"🏛️ {name} Average: {val}")
-                peers = df_merged[df_merged[group_col] == val].copy() if group_col in df_merged.columns else pd.DataFrame()
-                if not peers.empty and 'fiscal_year' in peers.columns:
-                    avg = peers.groupby('fiscal_year').mean(numeric_only=True).reset_index()
-                    st.dataframe(get_formatted_matrix(add_metrics(avg)), use_container_width=True, hide_index=True)
+        if sel_district != "Select...":
+            target = df_f[df_f['district_name'] == sel_district]
+            st.subheader(f"📍 Financial Ledger: {sel_district}")
+            st.dataframe(get_formatted_matrix(target), use_container_width=True, hide_index=True)
+            for name, group_col, val in [("Legislative District", 'ld_display', target['ld_display'].iloc[0] if 'ld_display' in target.columns and not target.empty else None),  
+                                       ("District Type", 'district_type', target['district_type'].iloc[0] if 'district_type' in target.columns and not target.empty else None)]:
+                if val and val != "Unknown":
+                    st.markdown("---")
+                    st.subheader(f"🏛️ {name} Average: {val}")
+                    peers = df_merged[df_merged[group_col] == val].copy() if group_col in df_merged.columns else pd.DataFrame()
+                    if not peers.empty and 'fiscal_year' in peers.columns:
+                        avg = peers.groupby('fiscal_year').mean(numeric_only=True).reset_index()
+                        st.dataframe(get_formatted_matrix(add_metrics(avg)), use_container_width=True, hide_index=True)
+
+    elif app_mode == "District Type Trends":
+        st.markdown("### 📊 Multi-Year Averages by District Type")
+        if 'district_type' in df_merged.columns:
+            type_grouped = df_merged.groupby(['district_type', 'fiscal_year']).mean(numeric_only=True).reset_index()
+            selected_type = st.selectbox("Select District Type:", sorted(type_grouped['district_type'].dropna().unique().tolist()))
+            
+            filtered_type = type_grouped[type_grouped['district_type'] == selected_type].copy()
+            st.subheader(f"Trend Analysis for District Type: {selected_type}")
+            st.dataframe(get_formatted_matrix(filtered_type), use_container_width=True, hide_index=True)
+
+    elif app_mode == "Legislative District Trends":
+        st.markdown("### 🏛️ Multi-Year Averages by Legislative District")
+        if 'ld_display' in df_merged.columns:
+            ld_grouped = df_merged.groupby(['ld_display', 'fiscal_year']).mean(numeric_only=True).reset_index()
+            selected_ld = st.selectbox("Select Legislative District:", sorted(ld_grouped['ld_display'].dropna().unique().tolist()))
+            
+            filtered_ld = ld_grouped[ld_grouped['ld_display'] == selected_ld].copy()
+            st.subheader(f"Trend Analysis for Legislative District: {selected_ld}")
+            st.dataframe(get_formatted_matrix(filtered_ld), use_container_width=True, hide_index=True)
 else:
     st.warning("No data retrieved from Supabase. Verify table permissions and Row Level Security (RLS) policies in your Supabase project settings.")
