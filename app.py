@@ -149,23 +149,25 @@ if not df_merged.empty:
                         st.dataframe(get_formatted_matrix(add_metrics(avg)), use_container_width=True, hide_index=True)
 
     elif app_mode == "District Type Trends":
-        st.markdown("### 📊 Multi-Year Averages by District Type")
+        st.markdown("### 📊 Multi-Year Averages Across All District Types")
+        st.markdown("*Scroll down to compare multi-year financial trends stacked by district type.*")
         if 'district_type' in df_merged.columns:
             type_grouped = df_merged.groupby(['district_type', 'fiscal_year']).mean(numeric_only=True).reset_index()
-            selected_type = st.selectbox("Select District Type:", sorted(type_grouped['district_type'].dropna().unique().tolist()))
-            
-            filtered_type = type_grouped[type_grouped['district_type'] == selected_type].copy()
-            st.subheader(f"Trend Analysis for District Type: {selected_type}")
-            st.dataframe(get_formatted_matrix(filtered_type), use_container_width=True, hide_index=True)
+            for dt in sorted(type_grouped['district_type'].dropna().unique().tolist()):
+                st.markdown(f"---")
+                st.subheader(f"District Type: {dt}")
+                filtered_type = type_grouped[type_grouped['district_type'] == dt].copy()
+                st.dataframe(get_formatted_matrix(filtered_type), use_container_width=True, hide_index=True)
 
     elif app_mode == "Legislative District Trends":
-        st.markdown("### 🏛️ Multi-Year Averages by Legislative District")
+        st.markdown("### 🏛️ Multi-Year Averages Across All Legislative Districts")
+        st.markdown("*Scroll down to compare multi-year financial trends stacked by legislative district.*")
         if 'ld_display' in df_merged.columns:
             ld_grouped = df_merged.groupby(['ld_display', 'fiscal_year']).mean(numeric_only=True).reset_index()
-            selected_ld = st.selectbox("Select Legislative District:", sorted(ld_grouped['ld_display'].dropna().unique().tolist()))
-            
-            filtered_ld = ld_grouped[ld_grouped['ld_display'] == selected_ld].copy()
-            st.subheader(f"Trend Analysis for Legislative District: {selected_ld}")
-            st.dataframe(get_formatted_matrix(filtered_ld), use_container_width=True, hide_index=True)
+            for ld in sorted(ld_grouped['ld_display'].dropna().unique().tolist()):
+                st.markdown(f"---")
+                st.subheader(f"Legislative District: {ld}")
+                filtered_ld = ld_grouped[ld_grouped['ld_display'] == ld].copy()
+                st.dataframe(get_formatted_matrix(filtered_ld), use_container_width=True, hide_index=True)
 else:
     st.warning("No data retrieved from Supabase. Verify table permissions and Row Level Security (RLS) policies in your Supabase project settings.")
