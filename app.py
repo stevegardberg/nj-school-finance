@@ -89,21 +89,34 @@ def add_metrics(df):
         df['Tax_Levy_per_100'] = (df['actual_tax_levy'] / df['equalized_valuation'].replace(0, 1)) * 100
     return df
 
-def get_formatted_matrix(df):
+def get_formatted_matrix(df, is_multi_row=False):
     if df.empty:
         return df
-    col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded',
-                 'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS',
-                 'Pct_Change_Levy', 'equalized_valuation', 'Tax_Levy_per_100', 'district_income']
+    
+    # Adjust column order based on whether fiscal_year is present
+    if 'fiscal_year' in df.columns:
+        col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded',
+                     'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS',
+                     'Pct_Change_Levy', 'equalized_valuation', 'Tax_Levy_per_100', 'district_income']
+    else:
+        col_order = ['district_name', 'county_name', 'ld_display', 'district_type', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded',
+                     'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS', 'equalized_valuation', 'Tax_Levy_per_100', 'district_income']
+
     df_out = df[[c for c in col_order if c in df.columns]].copy()
-    rename = {'fiscal_year': 'Fiscal Year', 'adequacy_budget': 'Adequacy Budget', 'uncapped_aid': 'Uncapped Aid',
-              'actual_state_aid': 'Actual Aid', 'Over_Under_Funded': 'Over/Under Funded', 'Pct_Change_Aid': '% Change Actual Aid',
-              'local_fair_share': 'Local Fair Share', 'actual_tax_levy': 'Actual Levy', 'Over_Under_LFS': 'Over/Under LFS',
-              'Pct_Change_Levy': '% Change Actual Levy', 'equalized_valuation': 'Equalized Valuation',
-              'Tax_Levy_per_100': 'Levy per $100', 'district_income': 'District Income'}
+    
+    rename = {
+        'fiscal_year': 'Fiscal Year', 'district_name': 'District Name', 'county_name': 'County',
+        'ld_display': 'Legislative District', 'district_type': 'District Type',
+        'adequacy_budget': 'Adequacy Budget', 'uncapped_aid': 'Uncapped Aid',
+        'actual_state_aid': 'Actual Aid', 'Over_Under_Funded': 'Over/Under Funded', 'Pct_Change_Aid': '% Change Actual Aid',
+        'local_fair_share': 'Local Fair Share', 'actual_tax_levy': 'Actual Levy', 'Over_Under_LFS': 'Over/Under LFS',
+        'Pct_Change_Levy': '% Change Actual Levy', 'equalized_valuation': 'Equalized Valuation',
+        'Tax_Levy_per_100': 'Levy per $100', 'district_income': 'District Income'
+    }
     df_out = df_out.rename(columns=rename)
+    
     for col in df_out.columns:
-        if col != 'Fiscal Year':
+        if col not in ['Fiscal Year', 'District Name', 'County', 'Legislative District', 'District Type']:
             df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if '%' not in col and 'per $100' not in col.lower() else (f"{float(x):.2%}" if '%' in col else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"${float(x):,.0f}")))
     return df_out
 
@@ -115,7 +128,8 @@ st.sidebar.title("Navigation")
 app_mode = st.sidebar.selectbox("Choose View", [
     "District Financial Ledger", 
     "District Type Trends", 
-    "Legislative District Trends"
+    "Legislative District Trends",
+    "District Comparison Leaderboard"
 ])
 
 if not df_merged.empty:
@@ -169,5 +183,30 @@ if not df_merged.empty:
                 st.subheader(f"Legislative District: {ld}")
                 filtered_ld = ld_grouped[ld_grouped['ld_display'] == ld].copy()
                 st.dataframe(get_formatted_matrix(filtered_ld), use_container_width=True, hide_index=True)
+
+    elif app_mode == "District Comparison Leaderboard":
+        st.markdown("### 🏆 District Comparison Leaderboard (Multi-Year Sums)")
+        st.markdown("*One row per district summing all available fiscal years. Use table column headers to sort by over/under funding or tax levy metrics.*")
+        
+        # Group by district and sum financial metrics, keeping metadata attributes
+        meta_cols = ['district_name', 'county_name', 'ld_display', 'district_type']
+        available_meta = [c for c in meta_cols if c in df_merged.columns]
+        
+        sum_cols = ['adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'actual_tax_levy',
+                    'equalized_valuation', 'local_fair_share', 'district_income']
+        available_sums = [c for c in sum_cols if c in df_merged.columns]
+        
+        if available_meta and available_sums:
+            df_leaderboard = df_merged.groupby(available_meta)[available_sums].sum().reset_index()
+            
+            # Re-calculate comparative metrics on the summed totals
+            if 'actual_state_aid' in df_leaderboard.columns and 'uncapped_aid' in df_leaderboard.columns:
+                df_leaderboard['Over_Under_Funded'] = df_leaderboard['actual_state_aid'] - df_leaderboard['uncapped_aid']
+            if 'actual_tax_levy' in df_leaderboard.columns and 'local_fair_share' in df_leaderboard.columns:
+                df_leaderboard['Over_Under_LFS'] = df_leaderboard['actual_tax_levy'] - df_leaderboard['local_fair_share']
+            if 'actual_tax_levy' in df_leaderboard.columns and 'equalized_valuation' in df_leaderboard.columns:
+                df_leaderboard['Tax_Levy_per_100'] = (df_leaderboard['actual_tax_levy'] / df_leaderboard['equalized_valuation'].replace(0, 1)) * 100
+                
+            st.dataframe(get_formatted_matrix(df_leaderboard, is_multi_row=True), use_container_width=True, hide_index=True)
 else:
     st.warning("No data retrieved from Supabase. Verify table permissions and Row Level Security (RLS) policies in your Supabase project settings.")
