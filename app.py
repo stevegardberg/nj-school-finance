@@ -210,9 +210,9 @@ if not df_merged.empty:
             formatted_ld = get_formatted_matrix(df_leaderboard, is_multi_row=True)
             
             currency_cols = [c for c in formatted_ld.columns if c not in ['District Name', 'County', 'Legislative District', 'District Type', 'Levy per $100']]
-            column_config = {col: st.column_config.NumberColumn(format="$#,##0") for col in currency_cols}
+            column_config = {col: st.column_config.NumberColumn(format="dollar") for col in currency_cols}
             if 'Levy per $100' in formatted_ld.columns:
-                column_config['Levy per $100'] = st.column_config.NumberColumn(format="$#,##0.0000")
+                column_config['Levy per $100'] = st.column_config.NumberColumn(format="$%,.4f")
 
             st.dataframe(formatted_ld, use_container_width=True, hide_index=True, column_config=column_config)
 else:
