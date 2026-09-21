@@ -93,7 +93,6 @@ def get_formatted_matrix(df, is_multi_row=False):
     if df.empty:
         return df
     
-    # Adjust column order based on whether fiscal_year is present
     if 'fiscal_year' in df.columns:
         col_order = ['fiscal_year', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded',
                      'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS',
@@ -114,6 +113,9 @@ def get_formatted_matrix(df, is_multi_row=False):
         'Tax_Levy_per_100': 'Levy per $100', 'district_income': 'District Income'
     }
     df_out = df_out.rename(columns=rename)
+    
+    if is_multi_row:
+        return df_out
     
     for col in df_out.columns:
         if col not in ['Fiscal Year', 'District Name', 'County', 'Legislative District', 'District Type']:
@@ -186,9 +188,8 @@ if not df_merged.empty:
 
     elif app_mode == "District Comparison Leaderboard":
         st.markdown("### 🏆 District Comparison Leaderboard (Multi-Year Sums)")
-        st.markdown("*One row per district summing all available fiscal years. Use table column headers to sort by over/under funding or tax levy metrics.*")
+        st.markdown("*One row per district summing all available fiscal years. Click any column header to sort numerically.*")
         
-        # Group by district and sum financial metrics, keeping metadata attributes
         meta_cols = ['district_name', 'county_name', 'ld_display', 'district_type']
         available_meta = [c for c in meta_cols if c in df_merged.columns]
         
@@ -199,7 +200,6 @@ if not df_merged.empty:
         if available_meta and available_sums:
             df_leaderboard = df_merged.groupby(available_meta)[available_sums].sum().reset_index()
             
-            # Re-calculate comparative metrics on the summed totals
             if 'actual_state_aid' in df_leaderboard.columns and 'uncapped_aid' in df_leaderboard.columns:
                 df_leaderboard['Over_Under_Funded'] = df_leaderboard['actual_state_aid'] - df_leaderboard['uncapped_aid']
             if 'actual_tax_levy' in df_leaderboard.columns and 'local_fair_share' in df_leaderboard.columns:
@@ -207,6 +207,13 @@ if not df_merged.empty:
             if 'actual_tax_levy' in df_leaderboard.columns and 'equalized_valuation' in df_leaderboard.columns:
                 df_leaderboard['Tax_Levy_per_100'] = (df_leaderboard['actual_tax_levy'] / df_leaderboard['equalized_valuation'].replace(0, 1)) * 100
                 
-            st.dataframe(get_formatted_matrix(df_leaderboard, is_multi_row=True), use_container_width=True, hide_index=True)
+            formatted_ld = get_formatted_matrix(df_leaderboard, is_multi_row=True)
+            
+            currency_cols = [c for c in formatted_ld.columns if c not in ['District Name', 'County', 'Legislative District', 'District Type', 'Levy per $100']]
+            column_config = {col: st.column_config.NumberColumn(format="$#,##0") for col in currency_cols}
+            if 'Levy per $100' in formatted_ld.columns:
+                column_config['Levy per $100'] = st.column_config.NumberColumn(format="$#,##0.0000")
+
+            st.dataframe(formatted_ld, use_container_width=True, hide_index=True, column_config=column_config)
 else:
     st.warning("No data retrieved from Supabase. Verify table permissions and Row Level Security (RLS) policies in your Supabase project settings.")
