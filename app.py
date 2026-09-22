@@ -44,6 +44,8 @@ def get_data():
             df['cds'] = df['cds'].astype(str)
 
     df_merged = df_sum.copy()
+    if 'cds' in df_merged.columns and 'cds_code' in df_map.columns: # safe guard
+        pass
     if 'cds' in df_merged.columns and 'cds' in df_map.columns:
         df_merged = df_merged.merge(df_map[['cds', 'ld_display']], on='cds', how='left')
     if 'cds' in df_merged.columns and 'cds' in df_types.columns:
@@ -151,7 +153,8 @@ if not df_merged.empty:
         if sel_district != "Select...":
             target = df_f[df_f['district_name'] == sel_district]
             st.subheader(f"📍 Financial Ledger: {sel_district}")
-            st.dataframe(get_formatted_matrix(target), use_container_width=True, hide_index=True)
+            # Height set to 420px to fit all 10 years without scrolling
+            st.dataframe(get_formatted_matrix(target), use_container_width=True, hide_index=True, height=420)
             for name, group_col, val in [("Legislative District", 'ld_display', target['ld_display'].iloc[0] if 'ld_display' in target.columns and not target.empty else None),  
                                        ("District Type", 'district_type', target['district_type'].iloc[0] if 'district_type' in target.columns and not target.empty else None)]:
                 if val and val != "Unknown":
@@ -160,7 +163,7 @@ if not df_merged.empty:
                     peers = df_merged[df_merged[group_col] == val].copy() if group_col in df_merged.columns else pd.DataFrame()
                     if not peers.empty and 'fiscal_year' in peers.columns:
                         avg = peers.groupby('fiscal_year').mean(numeric_only=True).reset_index()
-                        st.dataframe(get_formatted_matrix(add_metrics(avg)), use_container_width=True, hide_index=True)
+                        st.dataframe(get_formatted_matrix(add_metrics(avg)), use_container_width=True, hide_index=True, height=420)
 
     elif app_mode == "District Type Trends":
         st.markdown("### 📊 Multi-Year Averages Across All District Types")
@@ -171,7 +174,7 @@ if not df_merged.empty:
                 st.markdown(f"---")
                 st.subheader(f"District Type: {dt}")
                 filtered_type = type_grouped[type_grouped['district_type'] == dt].copy()
-                st.dataframe(get_formatted_matrix(filtered_type), use_container_width=True, hide_index=True)
+                st.dataframe(get_formatted_matrix(filtered_type), use_container_width=True, hide_index=True, height=420)
 
     elif app_mode == "Legislative District Trends":
         st.markdown("### 🏛️ Multi-Year Averages Across All Legislative Districts")
@@ -182,7 +185,7 @@ if not df_merged.empty:
                 st.markdown(f"---")
                 st.subheader(f"Legislative District: {ld}")
                 filtered_ld = ld_grouped[ld_grouped['ld_display'] == ld].copy()
-                st.dataframe(get_formatted_matrix(filtered_ld), use_container_width=True, hide_index=True)
+                st.dataframe(get_formatted_matrix(filtered_ld), use_container_width=True, hide_index=True, height=420)
 
     elif app_mode == "District Comparison Leaderboard":
         st.markdown("### 🏆 District Comparison Leaderboard (Multi-Year Sums)")
@@ -216,6 +219,7 @@ if not df_merged.empty:
             if 'Levy per $100 Income' in formatted_ld.columns:
                 column_config['Levy per $100 Income'] = st.column_config.NumberColumn(format="$%,.4f")
 
-            st.dataframe(formatted_ld, use_container_width=True, hide_index=True, column_config=column_config)
+            # Height set to 750px to display roughly twice as many rows simultaneously
+            st.dataframe(formatted_ld, use_container_width=True, hide_index=True, column_config=column_config, height=750)
 else:
     st.warning("No data retrieved from Supabase. Verify table permissions and Row Level Security (RLS) policies in your Supabase project settings.")
