@@ -60,11 +60,12 @@ def add_metrics(df):
         return df
     if 'district_name' not in df.columns: df['district_name'] = 'Unknown'
     
-    # Safely convert district_name to string and append district code if 'cds' is present
+    # Vectorized string cleaning and appending of 4-digit district code
     if 'cds' in df.columns:
-        df['district_name'] = df['district_name'].astype(str)
-        dist_code = df['cds'].astype(str).str.zfill(6).str[-4:]
-        df['district_name'] = df['district_name'].apply(lambda x: x.split(' (')[0] if ' (' in x else x)
+        df['district_name'] = df['district_name'].fillna('Unknown').astype(str)
+        df['cds'] = df['cds'].fillna('').astype(str)
+        dist_code = df['cds'].str.zfill(6).str[-4:]
+        df['district_name'] = df['district_name'].str.split(' \(').str[0]
         df['district_name'] = df['district_name'] + ' (' + dist_code + ')'
 
     sort_cols = [c for c in ['district_name', 'fiscal_year'] if c in df.columns]
