@@ -60,10 +60,10 @@ def add_metrics(df):
         return df
     if 'district_name' not in df.columns: df['district_name'] = 'Unknown'
     
-    # Append district code to district name (e.g., Boonton Town (0450))
+    # Safely convert district_name to string and append district code if 'cds' is present
     if 'cds' in df.columns:
+        df['district_name'] = df['district_name'].astype(str)
         dist_code = df['cds'].astype(str).str.zfill(6).str[-4:]
-        # Prevent double appending if rerun
         df['district_name'] = df['district_name'].apply(lambda x: x.split(' (')[0] if ' (' in x else x)
         df['district_name'] = df['district_name'] + ' (' + dist_code + ')'
 
