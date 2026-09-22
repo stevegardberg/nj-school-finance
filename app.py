@@ -44,8 +44,6 @@ def get_data():
             df['cds'] = df['cds'].astype(str)
 
     df_merged = df_sum.copy()
-    if 'cds' in df_merged.columns and 'cds_code' in df_map.columns: # safe guard
-        pass
     if 'cds' in df_merged.columns and 'cds' in df_map.columns:
         df_merged = df_merged.merge(df_map[['cds', 'ld_display']], on='cds', how='left')
     if 'cds' in df_merged.columns and 'cds' in df_types.columns:
@@ -62,6 +60,13 @@ def add_metrics(df):
         return df
     if 'district_name' not in df.columns: df['district_name'] = 'Unknown'
     
+    # Append district code to district name (e.g., Boonton Town (0450))
+    if 'cds' in df.columns:
+        dist_code = df['cds'].astype(str).str.zfill(6).str[-4:]
+        # Prevent double appending if rerun
+        df['district_name'] = df['district_name'].apply(lambda x: x.split(' (')[0] if ' (' in x else x)
+        df['district_name'] = df['district_name'] + ' (' + dist_code + ')'
+
     sort_cols = [c for c in ['district_name', 'fiscal_year'] if c in df.columns]
     if sort_cols:
         df = df.sort_values(sort_cols)
@@ -153,7 +158,6 @@ if not df_merged.empty:
         if sel_district != "Select...":
             target = df_f[df_f['district_name'] == sel_district]
             st.subheader(f"📍 Financial Ledger: {sel_district}")
-            # Height set to 420px to fit all 10 years without scrolling
             st.dataframe(get_formatted_matrix(target), use_container_width=True, hide_index=True, height=420)
             for name, group_col, val in [("Legislative District", 'ld_display', target['ld_display'].iloc[0] if 'ld_display' in target.columns and not target.empty else None),  
                                        ("District Type", 'district_type', target['district_type'].iloc[0] if 'district_type' in target.columns and not target.empty else None)]:
@@ -219,7 +223,6 @@ if not df_merged.empty:
             if 'Levy per $100 Income' in formatted_ld.columns:
                 column_config['Levy per $100 Income'] = st.column_config.NumberColumn(format="$%,.4f")
 
-            # Height set to 750px to display roughly twice as many rows simultaneously
             st.dataframe(formatted_ld, use_container_width=True, hide_index=True, column_config=column_config, height=750)
 else:
     st.warning("No data retrieved from Supabase. Verify table permissions and Row Level Security (RLS) policies in your Supabase project settings.")
