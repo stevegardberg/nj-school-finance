@@ -30,32 +30,25 @@ def get_data():
     df_map = fetch_table("legislative_mapping")
     df_types = fetch_table("vw_district_cohorts")
 
-    # Safely standardize column names to lowercase strings
     for df in [df_sum, df_map, df_types]:
         if not df.empty:
             df.columns = df.columns.astype(str).str.lower()
         else:
             df.columns = pd.Index([])
 
-    # Map mapping variations to standard names
     if 'cds_code' in df_map.columns: df_map = df_map.rename(columns={'cds_code': 'cds'})
     if 'cds_code' in df_types.columns: df_types = df_types.rename(columns={'cds_code': 'cds'})
 
-    # Ensure CDS is a string to prevent merge mismatches
     for df in [df_sum, df_map, df_types]:
         if 'cds' in df.columns:
             df['cds'] = df['cds'].astype(str)
 
-    # Perform merges safely
     df_merged = df_sum.copy()
-    if 'cds' in df_merged.columns and 'cds_map' in locals() and 'cds' in df_map.columns: # safe check
-        pass
     if 'cds' in df_merged.columns and 'cds' in df_map.columns:
         df_merged = df_merged.merge(df_map[['cds', 'ld_display']], on='cds', how='left')
     if 'cds' in df_merged.columns and 'cds' in df_types.columns:
         df_merged = df_merged.merge(df_types[['cds', 'district_type']], on='cds', how='left')
         
-    # Fill missing identifiers
     if 'county_name' not in df_merged.columns: df_merged['county_name'] = 'Unassigned'
     if 'district_type' not in df_merged.columns: df_merged['district_type'] = 'Unknown'
     if 'ld_display' not in df_merged.columns: df_merged['ld_display'] = 'Unknown'
@@ -130,18 +123,18 @@ def get_formatted_matrix(df, is_multi_row=False):
 # Load data
 df_merged = add_metrics(get_data())
 
-# Sidebar Navigation
-st.sidebar.title("Navigation")
-app_mode = st.sidebar.selectbox("Choose View", [
+# Top Navigation Bar
+st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
+app_mode = st.selectbox("Navigation View", [
     "District Financial Ledger", 
     "District Type Trends", 
     "Legislative District Trends",
     "District Comparison Leaderboard"
 ])
+st.markdown("---")
 
 if not df_merged.empty:
     if app_mode == "District Financial Ledger":
-        st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
         c1, c2, c3, c4 = st.columns(4)
         sel_ld = c1.selectbox("1️⃣ Legislative:", ["All"] + sorted(df_merged['ld_display'].dropna().unique().tolist())) if 'ld_display' in df_merged.columns else "All"
         sel_type = c2.selectbox("2️⃣ District Type:", ["All"] + sorted(df_merged['district_type'].dropna().unique().tolist())) if 'district_type' in df_merged.columns else "All"
