@@ -103,14 +103,14 @@ def get_formatted_matrix(df, is_multi_row=False):
                      'Pct_Change_Aid', 'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS',
                      'Pct_Change_Levy', 'equalized_valuation', 'Tax_Levy_per_100', 'district_income', 'Tax_Levy_per_100_Income']
     else:
-        col_order = ['district_name', 'county_name', 'ld_display', 'district_type', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded',
+        col_order = ['district_name', 'county_name', 'district_type', 'adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'Over_Under_Funded',
                      'local_fair_share', 'actual_tax_levy', 'Over_Under_LFS', 'equalized_valuation', 'Tax_Levy_per_100', 'district_income', 'Tax_Levy_per_100_Income']
 
     df_out = df[[c for c in col_order if c in df.columns]].copy()
     
     rename = {
         'fiscal_year': 'Fiscal Year', 'district_name': 'District Name', 'county_name': 'County',
-        'ld_display': 'Legislative District', 'district_type': 'District Type',
+        'district_type': 'District Type',
         'adequacy_budget': 'Adequacy Budget', 'uncapped_aid': 'Uncapped Aid',
         'actual_state_aid': 'Actual Aid', 'Over_Under_Funded': 'Over/Under Funded', 'Pct_Change_Aid': '% Change Actual Aid',
         'local_fair_share': 'Local Fair Share', 'actual_tax_levy': 'Actual Levy', 'Over_Under_LFS': 'Over/Under LFS',
@@ -124,7 +124,7 @@ def get_formatted_matrix(df, is_multi_row=False):
         return df_out
     
     for col in df_out.columns:
-        if col not in ['Fiscal Year', 'District Name', 'County', 'Legislative District', 'District Type']:
+        if col not in ['Fiscal Year', 'District Name', 'County', 'District Type']:
             df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if '%' not in col and 'per $100' not in col.lower() else (f"{float(x):.2%}" if '%' in col else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"${float(x):,.0f}")))
     return df_out
 
@@ -196,7 +196,8 @@ if not df_merged.empty:
         st.markdown("### 🏆 District Comparison Leaderboard (Multi-Year Sums)")
         st.markdown("*One row per district summing all available fiscal years. Click any column header to sort numerically.*")
         
-        meta_cols = ['district_name', 'county_name', 'ld_display', 'district_type']
+        # Exclude ld_display so districts spanning multiple legislative districts only appear once
+        meta_cols = ['district_name', 'county_name', 'district_type']
         available_meta = [c for c in meta_cols if c in df_merged.columns]
         
         sum_cols = ['adequacy_budget', 'uncapped_aid', 'actual_state_aid', 'actual_tax_levy',
@@ -217,7 +218,7 @@ if not df_merged.empty:
                 
             formatted_ld = get_formatted_matrix(df_leaderboard, is_multi_row=True)
             
-            currency_cols = [c for c in formatted_ld.columns if c not in ['District Name', 'County', 'Legislative District', 'District Type', 'Levy per $100', 'Levy per $100 Income']]
+            currency_cols = [c for c in formatted_ld.columns if c not in ['District Name', 'County', 'District Type', 'Levy per $100', 'Levy per $100 Income']]
             column_config = {col: st.column_config.NumberColumn(format="dollar") for col in currency_cols}
             if 'Levy per $100' in formatted_ld.columns:
                 column_config['Levy per $100'] = st.column_config.NumberColumn(format="$%,.4f")
