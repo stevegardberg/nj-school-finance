@@ -33,8 +33,8 @@ if not st.session_state.user_session:
   )
 
   with st.form("extended_signup_form"):
-    name_input = st.text_input("Full Name")
-    email_input = st.text_input("Official Email Address")
+    name_input = st.text_input("Full Name (Required)")
+    email_input = st.text_input("Official Email Address (Required)")
     org_input = st.text_input("Organization / District Name")
     org_type_input = st.selectbox(
         "Stakeholder Category",
@@ -62,7 +62,7 @@ if not st.session_state.user_session:
         except Exception as e:
           st.error(f"Error initiating login: {e}")
       else:
-        st.warning("Please provide at least your name and email address.")
+        st.warning("Please provide both your Full Name and Email Address.")
   st.stop()
 
 # Data API Setup
