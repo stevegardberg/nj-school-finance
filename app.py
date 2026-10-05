@@ -24,34 +24,45 @@ if "access_token" in query_params and not st.session_state.user_session:
   except Exception as e:
     st.error(f"Authentication failed: {e}")
 
-# Gated Login UI
+# Gated Login UI with Stakeholder Category Selection
 if not st.session_state.user_session:
   st.subheader("🏛️ NJ School Finance Intelligence Platform — Secure Access")
   st.write(
-      "Please enter your official email address to receive a secure, passwordless"
+      "Please enter your credentials below to receive a secure, passwordless"
       " login link."
   )
 
-  with st.form("magic_link_form"):
-    email_input = st.text_input("Email Address")
-    submit_button = st.form_submit_button("Send Magic Link")
+  with st.form("extended_signup_form"):
+    name_input = st.text_input("Full Name")
+    email_input = st.text_input("Official Email Address")
+    org_input = st.text_input("Organization / District Name")
+    org_type_input = st.selectbox(
+        "Stakeholder Category",
+        ["School District", "State Agency", "Media", "Individual"],
+    )
+    submit_button = st.form_submit_button("Send Secure Magic Link")
 
     if submit_button:
-      if email_input:
+      if email_input and name_input:
         try:
           response = supabase.auth.sign_in_with_otp({
               "email": email_input,
               "options": {
-                  "email_redirect_to": "https://nj-school-finance.streamlit.app"
+                  "email_redirect_to": "https://nj-school-finance.streamlit.app",
+                  "data": {
+                      "full_name": name_input,
+                      "organization": org_input,
+                      "stakeholder_category": org_type_input,
+                  },
               },
           })
           st.info(
               f"Check your inbox at {email_input} for the secure login link."
           )
         except Exception as e:
-          st.error(f"Error sending magic link: {e}")
+          st.error(f"Error initiating login: {e}")
       else:
-        st.warning("Please enter a valid email address.")
+        st.warning("Please provide at least your name and email address.")
   st.stop()
 
 # Data API Setup
@@ -396,7 +407,7 @@ if not df_merged.empty:
         )
 
   elif app_mode == "Legislative District Trends":
-    st.markdown("### 🏛️️ Multi-Year Averages Across All Legislative Districts")
+    st.markdown("### 🏛 Multi-Year Averages Across All Legislative Districts")
     st.markdown(
         "*Scroll down to compare multi-year financial trends stacked by"
         " legislative district.*"
