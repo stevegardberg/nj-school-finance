@@ -13,12 +13,14 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 if "user_session" not in st.session_state:
   st.session_state.user_session = None
 
-# Check query parameters for incoming magic link tokens after redirect
-query_params = st.query_params
-if "access_token" in query_params and not st.session_state.user_session:
+# Check query parameters for incoming PKCE auth code after redirect
+if "code" in st.query_params and not st.session_state.user_session:
+  code = st.query_params["code"]
   try:
-    session = supabase.auth.get_session()
+    session = supabase.auth.exchange_code_for_session(code)
     st.session_state.user_session = session
+    # Clear query parameters to clean up the URL bar
+    st.query_params.clear()
     st.success("Email verified successfully!")
     st.rerun()
   except Exception as e:
@@ -65,12 +67,12 @@ if not st.session_state.user_session:
         st.warning("Please provide both your Full Name and Email Address.")
   st.stop()
 
-# Data API Setup
+# Data API Setup (Guaranteed to run only after successful authentication)
 headers = {
-    "apikey": st.secrets["headers"]["apikey"],
-    "Authorization": st.secrets["headers"]["Authorization"],
+    "apikey": st.secrets["supabase"]["key"],
+    "Authorization": f"Bearer {st.secrets['supabase']['key']}",
 }
-BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
+BASE_URL = f"{SUPABASE_URL}/rest/v1"
 
 
 @st.cache_data(ttl=3600)
