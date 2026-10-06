@@ -19,7 +19,6 @@ if "code" in st.query_params and not st.session_state.user_session:
   try:
     session = supabase.auth.exchange_code_for_session(code)
     st.session_state.user_session = session
-    # Clear query parameters to clean up the URL bar
     st.query_params.clear()
     st.success("Email verified successfully!")
     st.rerun()
@@ -67,10 +66,10 @@ if not st.session_state.user_session:
         st.warning("Please provide both your Full Name and Email Address.")
   st.stop()
 
-# Data API Setup (Guaranteed to run only after successful authentication)
+# Data API Setup (Using correct secrets keys for headers)
 headers = {
-    "apikey": st.secrets["supabase"]["key"],
-    "Authorization": f"Bearer {st.secrets['supabase']['key']}",
+    "apikey": st.secrets["headers"]["apikey"],
+    "Authorization": st.secrets["headers"]["Authorization"],
 }
 BASE_URL = f"{SUPABASE_URL}/rest/v1"
 
