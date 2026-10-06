@@ -60,6 +60,7 @@ def get_data():
           "district name": "district_name",
           "cds code": "cds",
           "cds_code": "cds",
+          "district type": "district_type",
       }
       df = df.rename(columns=rename_map)
     else:
@@ -86,14 +87,16 @@ def get_data():
   if "cds" in df_merged.columns and "cds" in df_map.columns:
     df_merged = df_merged.merge(df_map[["cds", "ld_display"]], on="cds", how="left")
   if "cds" in df_merged.columns and "cds" in df_types.columns:
-    df_merged = df_merged.merge(
-        df_types[["cds", "district_type"]], on="cds", how="left"
-    )
+    type_cols = [c for c in ["cds", "district_type"] if c in df_types.columns]
+    df_merged = df_merged.merge(df_types[type_cols], on="cds", how="left")
 
   if "county_name" not in df_merged.columns:
     df_merged["county_name"] = "Unassigned"
   if "district_type" not in df_merged.columns:
     df_merged["district_type"] = "Unknown"
+  else:
+    df_merged["district_type"] = df_merged["district_type"].fillna("Unknown")
+
   if "ld_display" not in df_merged.columns:
     df_merged["ld_display"] = "Unknown"
 
@@ -348,7 +351,7 @@ if not df_merged.empty:
       ]:
         if val and val != "Unknown":
           st.markdown("---")
-          st.subheader(f"🏛️ {name} Average: {val}")
+          st.subheader(f"🏛️️ {name} Average: {val}")
           peers = (
               df_merged[df_merged[group_col] == val].copy()
               if group_col in df_merged.columns
