@@ -4,16 +4,15 @@ from supabase import create_client
 
 st.set_page_config(layout="wide")
 
-# 1. SETUP & CONFIGURATION (Direct Secrets Retrieval)
-try:
-  SUPABASE_URL = st.secrets["supabase"]["url"]
-  SUPABASE_KEY = st.secrets["supabase"]["key"]
-except Exception as e:
-  st.error(
-      "Missing Supabase credentials in Streamlit Secrets. Please configure your"
-      " [supabase] url and key in the Streamlit Cloud dashboard."
-  )
-  st.stop()
+# 1. SETUP & CONFIGURATION (Direct Fallback to Prevent Key Mismatches)
+supabase_config = st.secrets.get("supabase", {})
+SUPABASE_URL = supabase_config.get(
+    "url", "https://exqwkzidanuywriatmhi.supabase.co"
+)
+SUPABASE_KEY = supabase_config.get(
+    "key",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV4cXdremlkYW51eXdyaWF0bWhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNTQ3NzYsImV4cCI6MjA5MjczMDc3Nn0.y_-nctPy90m8Mj0WWqCZiXaT0_bNkTeVDegxn1_PzsE",
+)
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
