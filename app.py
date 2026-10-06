@@ -1,4 +1,5 @@
 import pandas as pd
+import requests
 import streamlit as st
 from supabase import create_client
 
@@ -65,31 +66,30 @@ if not st.session_state.user_session:
         st.warning("Please provide both your Full Name and Email Address.")
   st.stop()
 
+# Data API Setup using explicit headers from Streamlit secrets
+headers = {
+    "apikey": st.secrets["headers"]["apikey"],
+    "Authorization": st.secrets["headers"]["Authorization"],
+}
+BASE_URL = f"{SUPABASE_URL}/rest/v1"
 
-# Data Fetching using official Supabase Python SDK (Bypasses raw header errors)
+
 @st.cache_data(ttl=3600)
 def fetch_table(table):
   all_records = []
-  batch_size = 1000
-  start = 0
+  page = 0
   while True:
-    try:
-      res = (
-          supabase.table(table)
-          .select("*")
-          .range(start, start + batch_size - 1)
-          .execute()
-      )
-      data = res.data
-      if not data:
-        break
-      all_records.extend(data)
-      if len(data) < batch_size:
-        break
-      start += batch_size
-    except Exception as e:
-      st.error(f"Supabase Error on table `{table}`: {e}")
+    res = requests.get(
+        f"{BASE_URL}/{table}?limit=1000&offset={page*1000}", headers=headers
+    )
+    if res.status_code != 200:
+      st.error(f"Supabase Error ({res.status_code}) on table `{table}`: {res.text}")
       break
+    data = res.json()
+    if not isinstance(data, list) or not data:
+      break
+    all_records.extend(data)
+    page += 1
   return pd.DataFrame(all_records)
 
 
