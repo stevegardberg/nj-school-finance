@@ -4,7 +4,7 @@ from supabase import create_client
 
 st.set_page_config(layout="wide")
 
-# 1. SETUP & AUTHENTICATION (Using verified legacy JWT anon key)
+# 1. SETUP & AUTHENTICATION (Using your legacy JWT anon key)
 SUPABASE_URL = st.secrets["supabase"].get(
     "url", "https://exqwkzidanuywriatmhi.supabase.co"
 )
@@ -71,7 +71,7 @@ if not st.session_state.user_session:
   st.stop()
 
 
-# 2. DATA ARCHITECTURE: INGESTION & CLEANING PROTOCOL
+# 2. DATA ARCHITECTURE: INGESTION & CLEANING PROTOCOL (Using official SDK)
 @st.cache_data(ttl=3600)
 def fetch_table(table):
   all_records = []
@@ -106,18 +106,12 @@ def get_data():
 
   for df in [df_sum, df_map, df_types]:
     if not df.empty:
-      # Schema Audit & Case Neutralization
       df.columns = df.columns.astype(str).str.lower().str.strip()
-
-      # Synonym Mapping
       rename_map = {
           "coname": "county_name",
           "county name": "county_name",
           "distname": "district_name",
           "district name": "district_name",
-          "appr": "amount",
-          "amount_1": "amount",
-          "total_amount": "amount",
           "cds code": "cds",
           "cds_code": "cds",
       }
@@ -125,7 +119,6 @@ def get_data():
     else:
       df.columns = pd.Index([])
 
-  # 6-Digit CDS Rule & String Formatting
   for df in [df_sum, df_map, df_types]:
     if "cds" in df.columns:
       df["cds"] = (
@@ -178,7 +171,6 @@ def add_metrics(df):
   if sort_cols:
     df = df.sort_values(sort_cols)
 
-  # Numeric Purification (Handling $, commas, %, and accounting parentheses)
   num_cols = [
       "actual_state_aid",
       "uncapped_aid",
