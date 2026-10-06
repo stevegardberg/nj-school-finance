@@ -4,9 +4,14 @@ from supabase import create_client
 
 st.set_page_config(layout="wide")
 
-# 1. SETUP & AUTHENTICATION
-SUPABASE_URL = st.secrets["supabase"]["url"]
-SUPABASE_KEY = st.secrets["supabase"]["key"]
+# 1. SETUP & AUTHENTICATION (Using verified legacy JWT anon key)
+SUPABASE_URL = st.secrets["supabase"].get(
+    "url", "https://exqwkzidanuywriatmhi.supabase.co"
+)
+SUPABASE_KEY = st.secrets["supabase"].get(
+    "key",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV4cXdremlkYW51eXdyaWF0bWhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNTQ3NzYsImV4cCI6MjA5MjczMDc3Nn0.y_-nctPy90m8Mj0WWqCZiXaT0_bNkTeVDegxn1_PzsE",
+)
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 if "user_session" not in st.session_state:
@@ -66,7 +71,7 @@ if not st.session_state.user_session:
   st.stop()
 
 
-# Data Fetching using official Supabase Python SDK
+# 2. DATA ARCHITECTURE: INGESTION & CLEANING PROTOCOL
 @st.cache_data(ttl=3600)
 def fetch_table(table):
   all_records = []
@@ -101,18 +106,42 @@ def get_data():
 
   for df in [df_sum, df_map, df_types]:
     if not df.empty:
-      df.columns = df.columns.astype(str).str.lower()
+      # Schema Audit & Case Neutralization
+      df.columns = df.columns.astype(str).str.lower().str.strip()
+
+      # Synonym Mapping
+      rename_map = {
+          "coname": "county_name",
+          "county name": "county_name",
+          "distname": "district_name",
+          "district name": "district_name",
+          "appr": "amount",
+          "amount_1": "amount",
+          "total_amount": "amount",
+          "cds code": "cds",
+          "cds_code": "cds",
+      }
+      df = df.rename(columns=rename_map)
     else:
       df.columns = pd.Index([])
 
-  if "cds_code" in df_map.columns:
-    df_map = df_map.rename(columns={"cds_code": "cds"})
-  if "cds_code" in df_types.columns:
-    df_types = df_types.rename(columns={"cds_code": "cds"})
-
+  # 6-Digit CDS Rule & String Formatting
   for df in [df_sum, df_map, df_types]:
     if "cds" in df.columns:
-      df["cds"] = df["cds"].astype(str)
+      df["cds"] = (
+          df["cds"]
+          .astype(str)
+          .str.replace(r"\.0$", "", regex=True)
+          .str.zfill(6)
+      )
+    if "county_name" in df.columns:
+      df["county_name"] = (
+          df["county_name"].astype(str).str.title().str.strip()
+      )
+    if "district_name" in df.columns:
+      df["district_name"] = (
+          df["district_name"].astype(str).str.title().str.strip()
+      )
 
   df_merged = df_sum.copy()
   if "cds" in df_merged.columns and "cds" in df_map.columns:
@@ -149,6 +178,7 @@ def add_metrics(df):
   if sort_cols:
     df = df.sort_values(sort_cols)
 
+  # Numeric Purification (Handling $, commas, %, and accounting parentheses)
   num_cols = [
       "actual_state_aid",
       "uncapped_aid",
@@ -160,7 +190,18 @@ def add_metrics(df):
   ]
   for col in num_cols:
     if col in df.columns:
-      df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+      if df[col].dtype == object:
+        cleaned = (
+            df[col]
+            .astype(str)
+            .str.replace("$", "", regex=False)
+            .str.replace(",", "", regex=False)
+            .str.replace("%", "", regex=False)
+        )
+        cleaned = cleaned.str.replace(r"\((.*?)\)", r"-\1", regex=True)
+        df[col] = pd.to_numeric(cleaned, errors="coerce").fillna(0)
+      else:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
   if "district_name" in df.columns and "fiscal_year" in df.columns:
     if "actual_state_aid" in df.columns:
