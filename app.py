@@ -4,7 +4,7 @@ from supabase import create_client
 
 st.set_page_config(layout="wide")
 
-# 1. SETUP & CONFIGURATION (Direct Fallback to Prevent Key Mismatches)
+# 1. SETUP & CONFIGURATION
 supabase_config = st.secrets.get("supabase", {})
 SUPABASE_URL = supabase_config.get(
     "url", "https://exqwkzidanuywriatmhi.supabase.co"
@@ -50,21 +50,35 @@ def get_data():
   df_map = fetch_table("legislative_mapping")
   df_types = fetch_table("vw_district_cohorts")
 
-  for df in [df_sum, df_map, df_types]:
-    if not df.empty:
-      df.columns = df.columns.astype(str).str.lower().str.strip()
-      rename_map = {
-          "coname": "county_name",
-          "county name": "county_name",
-          "distname": "district_name",
-          "district name": "district_name",
-          "cds code": "cds",
-          "cds_code": "cds",
-          "district type": "district_type",
-      }
-      df = df.rename(columns=rename_map)
-    else:
-      df.columns = pd.Index([])
+  rename_map = {
+      "coname": "county_name",
+      "county name": "county_name",
+      "distname": "district_name",
+      "district name": "district_name",
+      "cds code": "cds",
+      "cds_code": "cds",
+      "cds": "cds",
+      "district type": "district_type",
+      "district_type": "district_type",
+  }
+
+  if not df_sum.empty:
+    df_sum.columns = df_sum.columns.astype(str).str.lower().str.strip()
+    df_sum = df_sum.rename(columns=rename_map)
+  else:
+    df_sum.columns = pd.Index([])
+
+  if not df_map.empty:
+    df_map.columns = df_map.columns.astype(str).str.lower().str.strip()
+    df_map = df_map.rename(columns=rename_map)
+  else:
+    df_map.columns = pd.Index([])
+
+  if not df_types.empty:
+    df_types.columns = df_types.columns.astype(str).str.lower().str.strip()
+    df_types = df_types.rename(columns=rename_map)
+  else:
+    df_types.columns = pd.Index([])
 
   for df in [df_sum, df_map, df_types]:
     if "cds" in df.columns:
