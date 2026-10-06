@@ -4,14 +4,12 @@ from supabase import create_client
 
 st.set_page_config(layout="wide")
 
-# 1. SETUP & AUTHENTICATION (Using your legacy JWT anon key)
+# 1. SETUP & AUTHENTICATION (Clean initialization for Auth + PostgREST)
 SUPABASE_URL = st.secrets["supabase"].get(
     "url", "https://exqwkzidanuywriatmhi.supabase.co"
 )
-SUPABASE_KEY = st.secrets["supabase"].get(
-    "key",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV4cXdremlkYW51eXdyaWF0bWhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzcxNTQ3NzYsImV4cCI6MjA5MjczMDc3Nn0.y_-nctPy90m8Mj0WWqCZiXaT0_bNkTeVDegxn1_PzsE",
-)
+SUPABASE_KEY = st.secrets["supabase"].get("key", "").strip()
+
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 if "user_session" not in st.session_state:
@@ -71,7 +69,7 @@ if not st.session_state.user_session:
   st.stop()
 
 
-# 2. DATA ARCHITECTURE: INGESTION & CLEANING PROTOCOL (Using official SDK)
+# 2. DATA ARCHITECTURE: INGESTION & CLEANING PROTOCOL
 @st.cache_data(ttl=3600)
 def fetch_table(table):
   all_records = []
