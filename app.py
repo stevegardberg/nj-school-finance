@@ -66,12 +66,12 @@ if not st.session_state.user_session:
         st.warning("Please provide both your Full Name and Email Address.")
   st.stop()
 
-# Data API Setup (Using correct secrets keys for headers)
+# Data API Setup (Using correct headers from Streamlit secrets)
 headers = {
     "apikey": st.secrets["headers"]["apikey"],
     "Authorization": st.secrets["headers"]["Authorization"],
 }
-BASE_URL = f"{SUPABASE_URL}/rest/v1"
+BASE_URL = "https://exqwkzidanuywriatmhi.supabase.co/rest/v1"
 
 
 @st.cache_data(ttl=3600)
