@@ -1,10 +1,11 @@
 import pandas as pd
+import requests
 import streamlit as st
 from supabase import create_client
 
 st.set_page_config(layout="wide")
 
-# 1. SETUP & AUTHENTICATION (Crash-proof secrets retrieval)
+# 1. SETUP & AUTHENTICATION (Direct HTTP Auth to bypass SDK header bug)
 supabase_config = st.secrets.get("supabase", {})
 SUPABASE_URL = supabase_config.get(
     "url", "https://exqwkzidanuywriatmhi.supabase.co"
@@ -23,11 +24,22 @@ if "user_session" not in st.session_state:
 if "code" in st.query_params and not st.session_state.user_session:
   code = st.query_params["code"]
   try:
-    session = supabase.auth.exchange_code_for_session(code)
-    st.session_state.user_session = session
-    st.query_params.clear()
-    st.success("Email verified successfully!")
-    st.rerun()
+    token_url = f"{SUPABASE_URL}/auth/v1/token?grant_type=pkce"
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+    resp = requests.post(
+        token_url, json={"auth_code": code}, headers=headers, timeout=10
+    )
+    if resp.status_code == 200:
+      st.session_state.user_session = resp.json()
+      st.query_params.clear()
+      st.success("Email verified successfully!")
+      st.rerun()
+    else:
+      st.error(f"Authentication failed: {resp.text}")
   except Exception as e:
     st.error(f"Authentication failed: {e}")
 
@@ -52,7 +64,13 @@ if not st.session_state.user_session:
     if submit_button:
       if email_input and name_input:
         try:
-          response = supabase.auth.sign_in_with_otp({
+          otp_url = f"{SUPABASE_URL}/auth/v1/otp"
+          headers = {
+              "apikey": SUPABASE_KEY,
+              "Authorization": f"Bearer {SUPABASE_KEY}",
+              "Content-Type": "application/json",
+          }
+          payload = {
               "email": email_input,
               "options": {
                   "email_redirect_to": "https://nj-school-finance.streamlit.app",
@@ -62,10 +80,16 @@ if not st.session_state.user_session:
                       "stakeholder_category": org_type_input,
                   },
               },
-          })
-          st.info(
-              f"Check your inbox at {email_input} for the secure login link."
+          }
+          resp = requests.post(
+              otp_url, json=payload, headers=headers, timeout=10
           )
+          if resp.status_code in [200, 201]:
+            st.info(
+                f"Check your inbox at {email_input} for the secure login link."
+            )
+          else:
+            st.error(f"Error initiating login: {resp.text}")
         except Exception as e:
           st.error(f"Error initiating login: {e}")
       else:
