@@ -104,6 +104,21 @@ def get_data():
     type_cols = [c for c in ["cds", "district_type"] if c in df_types.columns]
     df_merged = df_merged.merge(df_types[type_cols], on="cds", how="left")
 
+  # Dynamically append county area descriptions to ld_display
+  if "ld_display" in df_merged.columns and "county_name" in df_merged.columns:
+    ld_area_map = (
+        df_merged.groupby("ld_display")["county_name"]
+        .apply(lambda x: f" ({', '.join(sorted(x.dropna().unique()))})")
+        .to_dict()
+    )
+    df_merged["ld_display"] = df_merged["ld_display"].apply(
+        lambda x: (
+            f"{x}{ld_area_map.get(x, '')}"
+            if pd.notna(x) and not str(x).endswith(")")
+            else str(x)
+        )
+    )
+
   if "county_name" not in df_merged.columns:
     df_merged["county_name"] = "Unassigned"
   if "district_type" not in df_merged.columns:
