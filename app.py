@@ -1,11 +1,10 @@
 import pandas as pd
-import requests
 import streamlit as st
 from supabase import create_client
 
 st.set_page_config(layout="wide")
 
-# 1. SETUP & AUTHENTICATION (Direct HTTP Auth to bypass SDK header bug)
+# 1. SETUP & CONFIGURATION (No login gate)
 supabase_config = st.secrets.get("supabase", {})
 SUPABASE_URL = supabase_config.get(
     "url", "https://exqwkzidanuywriatmhi.supabase.co"
@@ -16,85 +15,6 @@ SUPABASE_KEY = supabase_config.get(
 )
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-if "user_session" not in st.session_state:
-  st.session_state.user_session = None
-
-# Check query parameters for incoming PKCE auth code after redirect
-if "code" in st.query_params and not st.session_state.user_session:
-  code = st.query_params["code"]
-  try:
-    token_url = f"{SUPABASE_URL}/auth/v1/token?grant_type=pkce"
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-    }
-    resp = requests.post(
-        token_url, json={"auth_code": code}, headers=headers, timeout=10
-    )
-    if resp.status_code == 200:
-      st.session_state.user_session = resp.json()
-      st.query_params.clear()
-      st.success("Email verified successfully!")
-      st.rerun()
-    else:
-      st.error(f"Authentication failed: {resp.text}")
-  except Exception as e:
-    st.error(f"Authentication failed: {e}")
-
-# Gated Login UI with Stakeholder Category Selection
-if not st.session_state.user_session:
-  st.subheader("🏛️ NJ School Finance Intelligence Platform — Secure Access")
-  st.write(
-      "Please enter your credentials below to receive a secure, passwordless"
-      " login link."
-  )
-
-  with st.form("extended_signup_form"):
-    name_input = st.text_input("Full Name (Required)")
-    email_input = st.text_input("Official Email Address (Required)")
-    org_input = st.text_input("Organization / District Name")
-    org_type_input = st.selectbox(
-        "Stakeholder Category",
-        ["School District", "State Agency", "Media", "Individual"],
-    )
-    submit_button = st.form_submit_button("Send Secure Magic Link")
-
-    if submit_button:
-      if email_input and name_input:
-        try:
-          otp_url = f"{SUPABASE_URL}/auth/v1/otp"
-          headers = {
-              "apikey": SUPABASE_KEY,
-              "Authorization": f"Bearer {SUPABASE_KEY}",
-              "Content-Type": "application/json",
-          }
-          payload = {
-              "email": email_input,
-              "options": {
-                  "email_redirect_to": "https://nj-school-finance.streamlit.app",
-                  "data": {
-                      "full_name": name_input,
-                      "organization": org_input,
-                      "stakeholder_category": org_type_input,
-                  },
-              },
-          }
-          resp = requests.post(
-              otp_url, json=payload, headers=headers, timeout=10
-          )
-          if resp.status_code in [200, 201]:
-            st.info(
-                f"Check your inbox at {email_input} for the secure login link."
-            )
-          else:
-            st.error(f"Error initiating login: {resp.text}")
-        except Exception as e:
-          st.error(f"Error initiating login: {e}")
-      else:
-        st.warning("Please provide both your Full Name and Email Address.")
-  st.stop()
 
 
 # 2. DATA ARCHITECTURE: INGESTION & CLEANING PROTOCOL
