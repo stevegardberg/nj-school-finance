@@ -1,11 +1,9 @@
-cat << 'EOF' > app.py
 import streamlit as st
 import pandas as pd
 from supabase import create_client
 
 st.set_page_config(layout="wide")
 
-# 1. SETUP - Using official supabase client matching test_db.py
 SUPABASE_URL = st.secrets["supabase"]["url"]
 SUPABASE_KEY = st.secrets["supabase"]["key"]
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -129,10 +127,8 @@ for col in df_out.columns:
         df_out[col] = df_out[col].apply(lambda x: f"${float(x):,.0f}" if '%' not in col and 'per $100' not in col.lower() else (f"{float(x):.2%}" if '%' in col else (f"{float(x):.4f}" if 'per $100' in col.lower() else f"${float(x):,.0f}")))
 return df_out
 
-# Load data
 df_merged = add_metrics(get_data())
 
-# Top Navigation Bar
 st.markdown("### 🏛️ New Jersey School Finance Intelligence Platform")
 app_mode = st.selectbox("Navigation View", [
 "District Financial Ledger", 
@@ -228,10 +224,3 @@ elif app_mode == "District Comparison Leaderboard":
         st.dataframe(formatted_ld, use_container_width=True, hide_index=True, column_config=column_config, height=750)
 else:
 st.warning("No data retrieved from Supabase. Verify table permissions and Row Level Security (RLS) policies in your Supabase project settings.")
-EOF
-
-git add app.py
-git commit -m "Fix fetch_table indentation in app.py"
-git push origin main
-fuser -k 8501/tcp
-streamlit run app.py --server.address 0.0.0.0 --server.port 8501 --server.enableCORS false --server.enableXsrfProtection false &
