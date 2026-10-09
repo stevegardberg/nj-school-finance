@@ -1,3 +1,4 @@
+cat << 'EOF' > app.py
 import streamlit as st
 import pandas as pd
 from supabase import create_client
@@ -227,3 +228,10 @@ elif app_mode == "District Comparison Leaderboard":
         st.dataframe(formatted_ld, use_container_width=True, hide_index=True, column_config=column_config, height=750)
 else:
 st.warning("No data retrieved from Supabase. Verify table permissions and Row Level Security (RLS) policies in your Supabase project settings.")
+EOF
+
+git add app.py
+git commit -m "Fix fetch_table indentation in app.py"
+git push origin main
+fuser -k 8501/tcp
+streamlit run app.py --server.address 0.0.0.0 --server.port 8501 --server.enableCORS false --server.enableXsrfProtection false &
